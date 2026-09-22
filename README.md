@@ -174,7 +174,6 @@ config sets them; in no-config mode the listed default applies.
 | `etopo_path` | `etopo60.cdf` | req | bathymetry grid; env `OHC_ETOPO` in no-config mode |
 | `basinmask_path` | `basinmask_04.msk` | req | basin table; env `OHC_BASINMASK` in no-config mode |
 | `bathy_clip_m` | *(none = off)* | | uniform clip depth (m) → the `bed_above_clip` bit; WMO/GCOS uses `300.0` |
-| `missing_sentinel` | *(none = off)* | | raw mapping value treated as missing → NaN at ingest; WMO/GCOS uses `0.0` |
 | `cp0` | `3989.244` | | OHC scale `cp0·rho0`, J/(kg·K) |
 | `rho0` | `1030.0` | | OHC scale `cp0·rho0`, kg/m³ |
 | `dir_mean` / `dir_ensemble` / `dir_out` | `.` | | I/O directories (usually set per-run via the `--dir_*` flags above) |

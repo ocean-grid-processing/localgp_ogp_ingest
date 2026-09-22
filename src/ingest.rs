@@ -5,8 +5,8 @@
 //! month). Our zarr chunks are per-member, so we accumulate the full layer and emit:
 //!   - `ohc_mean`     `[time, lat, lon]`          (the FullField posterior mean)
 //!   - `ohc_ensemble` `[member, time, lat, lon]`  (the 100 conditional simulations)
-//! Integrated temperature is converted to OHC (`* cp0 * rho0`) on the way in; NaNs — and any
-//! configured `missing_sentinel` value — are preserved/stored as NaN; arrays are transposed from
+//! Integrated temperature is converted to OHC (`* cp0 * rho0`) on the way in; NaN is the
+//! mapping's missing value and is preserved as NaN; arrays are transposed from
 //! the `.mat`'s `[lon, lat]` order to `[lat, lon]`. Both mean and ensemble are stored f64
 //! (~13.7 GB for 264 months × 100 members — the RAM bet on the cluster).
 
@@ -33,9 +33,8 @@ pub struct LayerData {
 /// `ohc_ensemble: None` — for mean-only products (e.g. the GCOS deliverable) where the ensemble
 /// is never used downstream, and to run without a complete set of CondSim `.mat` files.
 ///
-/// `cfg.missing_sentinel` (e.g. `0.0`), if set, converts any raw mapping value equal to it into
-/// NaN here at read time — so a cell the mapping zero-filled (rather than NaN-filled) is treated
-/// as missing everywhere downstream, matching the original's `val2use_asNaN` sentinel.
+/// Missing values arrive as NaN and stay NaN (LocalGP marks missing with NaN); no other value is
+/// interpreted as missing.
 pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: bool) -> Result<LayerData> {
     let layer = &slice.layer;
     let nlat = grid.nlat();
@@ -44,7 +43,6 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
     let nt = time.len();
     let nm = crate::consts::NMEMBER;
     let scale = cfg.cp0 * cfg.rho0;
-    let sentinel = cfg.missing_sentinel; // raw mapping value meaning "missing" (e.g. 0.0); -> NaN
 
     let mut ohc_mean = Array3::<f64>::from_elem((nt, nlat, nlon), f64::NAN);
     let mut ohc_ensemble = if mean_only {
@@ -62,7 +60,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
         for j in 0..nlat {
             for i in 0..nlon {
                 let v = mean[[i, j]]; // transpose [lon,lat]→[lat,lon]
-                ohc_mean[[t, j, i]] = if sentinel == Some(v) { f64::NAN } else { v * scale };
+                ohc_mean[[t, j, i]] = v * scale; // NaN stays NaN
             }
         }
 
@@ -76,8 +74,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
                 for j in 0..nlat {
                     for i in 0..nlon {
                         let v = ens[[i, j, m]];
-                        ens_arr[[m, t, j, i]] =
-                            if sentinel == Some(v) { f64::NAN } else { v * scale };
+                        ens_arr[[m, t, j, i]] = v * scale; // NaN stays NaN
                     }
                 }
             }

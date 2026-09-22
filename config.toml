@@ -11,7 +11,6 @@ model_name = "SpaceTimeTrend"
 latitude_range_to_keep = [-64.5, 64.5]
 basins_to_remove       = [0, 5, 6, 7, 8, 9, 53]
 bathy_clip_m = 300
-missing_sentinel = 0.0
 
 # Directory holding the per-layer LocalGP .mat output (adjust to your cluster paths).
 #dir_mean       = "/pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_15_20/Results/FullField"

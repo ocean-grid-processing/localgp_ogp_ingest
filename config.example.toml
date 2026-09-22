@@ -16,11 +16,6 @@ basins_to_remove       = [0, 5, 6, 7, 8, 9, 53]
 # WMO product uses 300 — matches the original `max_pressure_to_keep = 300`. Write it as a float.
 # bathy_clip_m = 300.0
 
-# Missing-value sentinel: a raw mapping value that means "missing" → converted to NaN at ingest,
-# mirroring the original's val2use_asNaN. GCOS/WMO uses 0.0 (absolute OHC is never 0 at a wet
-# cell, so any zero-filled cell is dropped). Omit to treat only NaN as missing.
-# missing_sentinel = 0.0
-
 # LocalGP .mat output dirs — mean and ensemble live in separate directories.
 # Use absolute paths on the cluster (jobs may start in an unpredictable cwd).
 # These three are OPTIONAL here: omit them and pass --dir_mean / --dir_ensemble / --dir_out on the
