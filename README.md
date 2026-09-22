@@ -29,7 +29,8 @@ The store the Rust core writes is *not* a protocol artifact — it's our interna
 
 For one mapped layer:
 
-1. Read the LocalGP `.mat` files (FullField mean + 100-member LocalCondSim ensemble), month by
+1. Read the LocalGP `.mat` files (FullField mean + the LocalCondSim ensemble, whose size is read
+   from the files — 100 members to date), month by
    month.
 2. Convert integrated temperature to OHC (`× cp0 × rho0`), preserving NaNs.
 3. Transpose month-major input → member-major arrays (buffer the whole layer in RAM).
@@ -52,8 +53,8 @@ Full provenance, versions, and citations are in [`data/README.md`](data/README.m
 `ohc_<tag>_<Ymin>_<Ymax>_plev<top>_<bottom>.zarr` (the years are the discovered data span), containing:
 
 - `ohc_mean` `(time, lat, lon)` — the posterior-mean OHC, J/m², NaN preserved.
-- `ohc_ensemble` `(member, time, lat, lon)` — the 100 conditional simulations, chunked one
-  file per member.
+- `ohc_ensemble` `(member, time, lat, lon)` — the conditional simulations (as many as the mapping
+  files held), chunked one file per member.
 - `mask_flags` `(lat, lon)` — the bit band, with CF `flag_masks`/`flag_meanings` (see
   [`mask_spec.md`](mask_spec.md)).
 - `etopo`, `basin_id`, `cell_area` `(lat, lon)` — ancillaries.

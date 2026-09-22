@@ -62,7 +62,7 @@ the CondSim files aren't read, and `publish.py` then emits `DATA` without `DATA_
 | `lon` | `(lon: 360)` | f64 | degrees_east, `20.5 … 379.5` |
 | `lat` | `(lat: 180)` | f64 | degrees_north, `−89.5 … 89.5` |
 | `time` | `(time: N)` | f64 | `days since <first-month>-15`, monthly (day 15) |
-| `member` | `(member: 100)` | i16 | `1 … 100` |
+| `member` | `(member: M)` | i16 | `1 … M`, M = the ensemble size the mapping files held (100 for LocalCondSim to date); absent in a mean-only store |
 
 ## Chunking
 
@@ -78,7 +78,7 @@ Codecs: `bytes` (little-endian) + `gzip` — pure Rust (no Blosc/HDF5), read nat
 - OHC stored in **J/m²** (after `cp0·rho0`); `cp0`/`rho0` are group attributes, so the scaling
   is invertible.
 - **Absolute, not anomaly** — anomaly referencing is a downstream choice.
-- The **full 100-member ensemble** is kept; std / percentiles derive on read.
+- The **full ensemble** is kept (every member the mapping files held); std / percentiles derive on read.
 - **Nothing is masked in the data** — masking lives in `mask_flags` (see `mask_spec.md`);
   per-timestep validity is `isfinite(data)`.
 

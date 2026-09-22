@@ -6,7 +6,9 @@
 //!
 //! Layout per layer (see ../zarr_schema.md):
 //!   ohc_mean      (time,lat,lon)         f64, 1 chunk
-//!   ohc_ensemble  (member,time,lat,lon)  f64, chunk (1,time,lat,lon) → one file per member
+//!   ohc_ensemble  (member,time,lat,lon)  f64, chunk (1,time,lat,lon) → one file per member;
+//!                 the member count is whatever the mapping files held (absent when mean-only,
+//!                 and then the `member` coordinate is absent too)
 //!   mask_flags    (lat,lon)              u8
 //!   etopo         (lat,lon)              f32
 //!   basin_id      (lat,lon)              i16
@@ -214,10 +216,13 @@ pub fn write_layer_store(
     let time = Array2::from_shape_vec((time_days.len(), 1), time_days)?;
     write_array_single_chunk(&root, "time", &time.column(0), &["time"],
         json!({"units": format!("days since {:04}-{:02}-15", y0, m0), "calendar":"proleptic_gregorian"}))?;
-    let member: Vec<i16> = (1..=crate::consts::NMEMBER as i16).collect();
-    let member = Array2::from_shape_vec((member.len(), 1), member)?;
-    write_array_single_chunk(&root, "member", &member.column(0), &["member"],
-        json!({"long_name":"conditional simulation member"}))?;
+    // The member coordinate exists only when the ensemble does; its length is the ensemble's.
+    if let Some(nm) = n_members {
+        let member: Vec<i16> = (1..=nm as i16).collect();
+        let member = Array2::from_shape_vec((member.len(), 1), member)?;
+        write_array_single_chunk(&root, "member", &member.column(0), &["member"],
+            json!({"long_name":"conditional simulation member"}))?;
+    }
 
     // ---- ancillary grids ----
     write_array_single_chunk(&root, "etopo", &etopo.view(), &["lat","lon"],

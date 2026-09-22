@@ -30,8 +30,6 @@ pub mod consts {
     pub const NLON: usize = 360;
     /// Mapping grid latitude count (−89.5 … 89.5, 1°).
     pub const NLAT: usize = 180;
-    /// Conditional-simulation ensemble size.
-    pub const NMEMBER: usize = 100;
 }
 
 /// The canonical 1° mapping grid (cell centres).
