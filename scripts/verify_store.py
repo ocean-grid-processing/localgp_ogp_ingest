@@ -6,6 +6,12 @@ Compares the entire store against the LocalGP .mat files — all timesteps of oh
 lon/lat transpose). Uses scipy.io.loadmat as an independent reader (not our Rust parser), and
 opens the store via xarray/zarr (the same path the downstream consumer uses).
 
+Alongside the equality check it tallies the raw mapping values (before scaling) — how many are
+positive, exactly zero, negative, or NaN, and the overall range — for the mean and the ensemble,
+and lists any months holding exact zeros. This is a report, not a check: it records the mapping's
+value conventions in the verification log so a change upstream (a numeric fill instead of NaN, a
+sign flip, an unphysical range for the mapped quantity) is visible here rather than in a product.
+
     python verify_store.py STORE.zarr DIR_MEAN DIR_ENSEMBLE
 
 Access pattern: the store is chunked one file per ensemble member, while the .mat are one file
@@ -31,6 +37,40 @@ def compare(expected, got):
     finite = ~np.isnan(expected)
     max_diff = float(np.abs(expected[finite] - got[finite]).max()) if finite.any() else 0.0
     return same_nan, max_diff
+
+
+class Tally:
+    """Running counts of the raw mapping values: >0, ==0, <0, NaN, plus the finite range."""
+
+    def __init__(self):
+        self.pos = self.zero = self.neg = self.nan = 0
+        self.vmin = np.inf
+        self.vmax = -np.inf
+        self.zero_months = []                      # (year, month) with any exact zero
+
+    def add(self, raw, year, month):
+        finite = raw[np.isfinite(raw)]
+        self.nan += int(raw.size - finite.size)
+        self.pos += int((finite > 0).sum())
+        self.neg += int((finite < 0).sum())
+        nz = int((finite == 0).sum())
+        self.zero += nz
+        if nz:
+            self.zero_months.append((year, month))
+        if finite.size:
+            self.vmin = min(self.vmin, float(finite.min()))
+            self.vmax = max(self.vmax, float(finite.max()))
+
+    def report(self, label):
+        total = self.pos + self.zero + self.neg + self.nan
+        pct = lambda n: (100.0 * n / total) if total else 0.0
+        print("  %-9s >0: %d (%.1f%%)  ==0: %d (%.1f%%)  <0: %d (%.1f%%)  NaN: %d (%.1f%%)  range [%g, %g]"
+              % (label, self.pos, pct(self.pos), self.zero, pct(self.zero), self.neg, pct(self.neg),
+                 self.nan, pct(self.nan), self.vmin, self.vmax))
+        if self.zero_months:
+            shown = ", ".join("%04d-%02d" % ym for ym in self.zero_months[:12])
+            more = " …" if len(self.zero_months) > 12 else ""
+            print("  %-9s months with exact zeros: %d (%s%s)" % ("", len(self.zero_months), shown, more))
 
 
 def main(store, dir_mean, dir_ensemble):
@@ -63,6 +103,8 @@ def main(store, dir_mean, dir_ensemble):
 
     worst_mean = 0.0
     worst_ens = 0.0
+    tally_mean = Tally()
+    tally_ens = Tally()
     for t in range(nt):
         dt = base + datetime.timedelta(days=int(round(float(times[t]))))
         year, month = dt.year, dt.month
@@ -71,7 +113,9 @@ def main(store, dir_mean, dir_ensemble):
         ens_path = os.path.join(dir_ensemble, stem % "LocalCondSim")
 
         # mean: loadmat gives [lon, lat] -> [lat, lon]
-        mat_mean = loadmat(mean_path)["fullFieldGrid"].T * scale
+        raw_mean = loadmat(mean_path)["fullFieldGrid"].T
+        tally_mean.add(raw_mean, year, month)
+        mat_mean = raw_mean * scale
         ok, md = compare(mat_mean, zmean_all[t])
         assert ok, "ohc_mean NaN footprint differs at %04d-%02d" % (year, month)
         assert md == 0.0, "ohc_mean differs at %04d-%02d (max %g)" % (year, month, md)
@@ -79,7 +123,9 @@ def main(store, dir_mean, dir_ensemble):
 
         # ensemble: [lon, lat, member] -> [member, lat, lon]  (skipped for mean-only stores)
         if has_ens:
-            mat_ens = np.transpose(loadmat(ens_path)["fullFieldGrid"], (2, 1, 0)) * scale
+            raw_ens = np.transpose(loadmat(ens_path)["fullFieldGrid"], (2, 1, 0))
+            tally_ens.add(raw_ens, year, month)
+            mat_ens = raw_ens * scale
             ok, md = compare(mat_ens, zens_all[:, t])
             assert ok, "ohc_ensemble NaN footprint differs at %04d-%02d" % (year, month)
             assert md == 0.0, "ohc_ensemble differs at %04d-%02d (max %g)" % (year, month, md)
@@ -87,6 +133,11 @@ def main(store, dir_mean, dir_ensemble):
 
         if (t + 1) % 24 == 0 or t == nt - 1:
             print("  checked %d/%d timesteps (through %04d-%02d)" % (t + 1, nt, year, month))
+
+    print("raw mapping values (before scaling):")
+    tally_mean.report("mean")
+    if has_ens:
+        tally_ens.report("ensemble")
 
     if has_ens:
         print("PASS — %d timesteps × %d members; ohc_mean max diff=%g, ohc_ensemble max diff=%g"

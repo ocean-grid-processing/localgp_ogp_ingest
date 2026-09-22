@@ -242,6 +242,11 @@ oracles; both load sizeable arrays, so run them inside the job allocation.
 
 - **`verify_store.py`** — three positional args (`STORE.zarr DIR_MEAN DIR_ENSEMBLE`), no flags. It
   auto-detects a mean-only store and skips the ensemble check (then `DIR_ENSEMBLE` is unused).
+  Before the PASS line it also tallies the raw mapping values (before scaling) — how many are
+  positive, exactly zero, negative, or NaN, the finite range, and any months holding exact zeros —
+  for the mean and the ensemble. That block is a report, not a check: it records the mapping's
+  value conventions in the log, so a change upstream (a numeric fill instead of NaN, a sign flip, an
+  unphysical range for the mapped quantity) is visible here.
 - **`verify_publish.py`** — the same three positional args, plus `--no-sd` (skip the `DATA_SD`
   check) and `--ensemble` (also check the `OHCENS_<...>.nc` sibling member-by-member).
 
