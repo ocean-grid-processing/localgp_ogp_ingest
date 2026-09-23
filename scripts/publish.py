@@ -10,7 +10,8 @@ since 1900-01-01, and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH-sty
 (`OHC_`, `MLD_`) and the experiment token appears only when --experiment is given.
 
     python publish.py STORE.zarr --code-version URL [--experiment B] \
-        [--tag OP20260127b] [--provenance-link URL] [--preset me4oh|wmo|wmo_wet] \
+        [--tag OP20260127b] [--provenance-link URL] \
+        [--preset me4oh|wmo|wmo_wet|wmo_layerless | --mask-bits name,name,...] \
         [--levels LOW,HIGH] [--ensemble] [--out DIR]
 
 The provenance tag and link are inherited from the store (stamped by the ingest --tag /
@@ -22,6 +23,10 @@ Provenance chain: each step namespaces its own local provenance by identity — 
 `*_run_facts` / `*_code_version` attrs forward untouched (opaque JSON strings) before adding its own.
 So this step copies the store's `localgp_ingest_*` blocks onto the submission verbatim and stamps
 `localgp_publish_*` (its resolved args, derived facts, and --code-version, this step's own code).
+
+Masking: --mask-bits names the bits to honor explicitly (comma list of names from mask_spec.md);
+--preset is a named alias for one such list. Give one or the other (default: --preset me4oh). The
+resolved list is recorded in the header (`mask_applied`) and in `localgp_publish_run_facts`.
 
 Mask presets (see ../mask_spec.md):
   me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
@@ -36,6 +41,10 @@ Mask presets (see ../mask_spec.md):
                     whole cell wet, so the partial (continental-slope) cells drop too. deep
                     supersedes shallow (the shallow=>deep sentinel); bed_above_clip is kept but
                     currently redundant (deep already covers it).
+  wmo_layerless   = the wmo crops for a quantity with no layer (e.g. a mixed layer depth, whose
+                    filename layer token is a name, not a depth range): validity + outside_latitude
+                    + removed_basin + bed_above_clip + ensemble_incomplete, and neither bed bit —
+                    bed_above_shallow/deep are computed against the nominal token and mean nothing.
 
 --ensemble additionally writes the full conditional-simulation ensemble as a sibling file
   <NAME>ENS_<...>.nc with DATA(MEMBER, LONGITUDE, LATITUDE, TIME) — same mask, units, and time
@@ -79,12 +88,34 @@ PRESETS = {
     # but currently redundant (bed_above_deep already covers every clipped cell).
     "wmo_wet": ["never_estimated", "incomplete_timeseries", "outside_latitude", "removed_basin",
                 "bed_above_deep", "bed_above_clip", "ensemble_incomplete"],
+    # The wmo crops without either bed bit, for a quantity that has no layer (the filename's layer
+    # token is a name, so the per-layer bathymetry bits carry no meaning). bed_above_clip stays: it
+    # is a fixed depth, independent of the layer.
+    "wmo_layerless": ["never_estimated", "incomplete_timeseries", "outside_latitude", "removed_basin",
+                      "bed_above_clip", "ensemble_incomplete"],
 }
 
 
-def preset_mask_value(preset):
+def resolve_mask_bits(preset, mask_bits):
+    """(--preset, --mask-bits) -> the list of bit names to honor. Exactly one of the two is given;
+    --mask-bits is the explicit list, --preset a named alias for one. Unknown names are an error."""
+    if preset and mask_bits:
+        raise SystemExit("give --preset or --mask-bits, not both")
+    if mask_bits:
+        names = [n.strip() for n in mask_bits.split(",") if n.strip()]
+        unknown = [n for n in names if n not in BITS]
+        if unknown:
+            raise SystemExit("unknown mask bit(s) %s; known: %s" % (unknown, list(BITS)))
+        if not names:
+            raise SystemExit("--mask-bits is empty; name at least one bit, or use --preset")
+        return names
+    return list(PRESETS[preset or "me4oh"])
+
+
+def mask_value(names):
+    """The OR of the named bits: a cell is dropped when any of them is set."""
     v = 0
-    for name in PRESETS[preset]:
+    for name in names:
         v |= BITS[name]
     return v
 
@@ -123,7 +154,11 @@ def main():
     ap.add_argument("--code-version", required=True,
                     help="URL to the exact publish code (commit/release); stamped as "
                          "localgp_publish_code_version. (This step's own code, not the store's.)")
-    ap.add_argument("--preset", default="me4oh", choices=list(PRESETS))
+    ap.add_argument("--preset", default=None, choices=list(PRESETS),
+                    help="named mask policy (default me4oh); an alias for a --mask-bits list")
+    ap.add_argument("--mask-bits", default=None,
+                    help="explicit comma list of mask bit names to honor (see mask_spec.md); "
+                         "alternative to --preset")
     ap.add_argument("--levels", default=None, help="LOW,HIGH meters for the filename (default: store layer bounds)")
     ap.add_argument("--no-uncertainty", action="store_true",
                     help="skip the ensemble standard-deviation field DATA_SD (reads all members)")
@@ -152,7 +187,9 @@ def main():
         print("note: mean-only store (no field_ensemble) — writing DATA without DATA_SD")
 
     # --- collapse the selected mask bits to NaN ---
-    mval = preset_mask_value(args.preset)
+    mask_names = resolve_mask_bits(args.preset, args.mask_bits)
+    mask_label = args.preset or "custom"
+    mval = mask_value(mask_names)
     masked = xr.DataArray((ds["mask_flags"].values.astype("uint8") & mval) != 0,
                           dims=("lat", "lon"))
     data = ds["field_mean"].where(~masked) / unit_factor   # [time, lat, lon], published units
@@ -209,8 +246,8 @@ def main():
         "model_name": g["model_name"],
         "mapped_layer": "%d_%d" % (int(g["layer_top"]), int(g["layer_bottom"])),
         "quantity": g["quantity"],                     # the ingest [quantity] table, rolled forward
-        "mask_preset": args.preset,
-        "mask_applied": " ".join(PRESETS[args.preset]),
+        "mask_preset": mask_label,
+        "mask_applied": " ".join(mask_names),
         "provenance_tag": tag,                         # run token; pointer to the provenance record
         "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
@@ -243,8 +280,8 @@ def main():
         "period": "%d_%d" % (y0, y1),
         "layer_m": "%s_%s" % (low, high),
         "mapped_layer": "%d_%d" % (int(g["layer_top"]), int(g["layer_bottom"])),
-        "preset": args.preset,
-        "mask_applied": PRESETS[args.preset],
+        "preset": mask_label,
+        "mask_applied": mask_names,
         "mask_value": int(mval),
         "publish_unit_factor": unit_factor,
         "publish_units": q["publish_units"],
@@ -266,8 +303,8 @@ def main():
     if include_sd:
         enc["DATA_SD"] = dict(chunk_enc)
     out.to_netcdf(path, engine="netcdf4", format="NETCDF4", encoding=enc)
-    print("wrote", path, "(%d timesteps, preset=%s, uncertainty=%s)"
-          % (len(days1900), args.preset, include_sd))
+    print("wrote", path, "(%d timesteps, mask=%s, uncertainty=%s)"
+          % (len(days1900), mask_label, include_sd))
 
     # --- optional: the full ensemble as a member-dimensioned sibling file ---
     if args.ensemble:
@@ -297,8 +334,8 @@ def main():
         eenc = {"DATA": {"zlib": True, "complevel": 4, "_FillValue": np.float64(np.nan),
                          "chunksizes": (1, nlon, nlat, ntime)}}
         eds.to_netcdf(epath, engine="netcdf4", format="NETCDF4", encoding=eenc)
-        print("wrote", epath, "(ensemble: %d members, preset=%s)"
-              % (ds.sizes["member"], args.preset))
+        print("wrote", epath, "(ensemble: %d members, mask=%s)"
+              % (ds.sizes["member"], mask_label))
 
 
 if __name__ == "__main__":
