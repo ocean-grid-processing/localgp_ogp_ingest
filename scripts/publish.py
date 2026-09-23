@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Project an ohc_ingest zarr store to an ME4OH-compliant NetCDF submission.
+"""Project an ohc_ingest zarr store to an ME4OH-shaped NetCDF submission.
 
-The zarr store is our source of truth (raw OHC + a bit-band mask, nothing masked out). A
+The zarr store is our source of truth (the raw field + a bit-band mask, nothing masked out). A
 compliant submission can only say "don't use this point" via NaN, so this step collapses the
-selected mask bits to NaN, converts J/m^2 -> TJ/m^2 and the time axis to days since 1900-01-01,
-and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH filename.
+selected mask bits to NaN, converts the stored units to the published ones (per the store's
+`quantity` attr: divide by `publish_unit_factor`, e.g. J/m^2 -> TJ/m^2) and the time axis to days
+since 1900-01-01, and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH-style filename
+`<NAME>_<tag>_<Y0>_<Y1>_lev<low>_<high>[_exp<X>].nc`, where NAME is the quantity's name upper-cased
+(`OHC_`, `MLD_`) and the experiment token appears only when --experiment is given.
 
-    python publish.py STORE.zarr --experiment B --code-version URL \
+    python publish.py STORE.zarr --code-version URL [--experiment B] \
         [--tag OP20260127b] [--provenance-link URL] [--preset me4oh|wmo|wmo_wet] \
         [--levels LOW,HIGH] [--ensemble] [--out DIR]
 
 The provenance tag and link are inherited from the store (stamped by the ingest --tag /
 --provenance-link) and carried onto the submission; --tag / --provenance-link override them. The
-tag is the run token in the filename (OHC_<tag>_..._exp<E>.nc) and the provenance_tag header attr.
+tag is the run token in the filename (<NAME>_<tag>_....nc) and the provenance_tag header attr.
 
 Provenance chain: each step namespaces its own local provenance by identity — `<step>_run_config`,
 `<step>_run_facts`, `<step>_code_version` — and every step rolls all upstream `*_run_config` /
@@ -35,7 +38,7 @@ Mask presets (see ../mask_spec.md):
                     currently redundant (deep already covers it).
 
 --ensemble additionally writes the full conditional-simulation ensemble as a sibling file
-  OHCENS_<...>.nc with DATA(MEMBER, LONGITUDE, LATITUDE, TIME) — same mask, units, and time
+  <NAME>ENS_<...>.nc with DATA(MEMBER, LONGITUDE, LATITUDE, TIME) — same mask, units, and time
   axis — for downstream uses that derive per-member quantities before collapsing to a spread.
   It is NOT an ME4OH submission (different filename, extra dimension). Reads all members.
 
@@ -77,7 +80,6 @@ PRESETS = {
     "wmo_wet": ["never_estimated", "incomplete_timeseries", "outside_latitude", "removed_basin",
                 "bed_above_deep", "bed_above_clip", "ensemble_incomplete"],
 }
-TERA = 1e12
 
 
 def preset_mask_value(preset):
@@ -85,6 +87,13 @@ def preset_mask_value(preset):
     for name in PRESETS[preset]:
         v |= BITS[name]
     return v
+
+
+def load_quantity(attrs):
+    """The store's `quantity` attr (the ingest [quantity] table, as compact JSON) -> dict."""
+    if "quantity" not in attrs:
+        raise SystemExit("store has no `quantity` attr (ingest it with the current ohc_ingest)")
+    return json.loads(attrs["quantity"])
 
 
 def fmt_lev(x):
@@ -101,7 +110,9 @@ def _sanitize_tag(tag):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("store")
-    ap.add_argument("--experiment", required=True)
+    ap.add_argument("--experiment", default=None,
+                    help="ME4OH experiment letter; adds the `exp<X>` filename token and the "
+                         "`experiment` attr. Omit for a product that isn't an ME4OH submission.")
     ap.add_argument("--tag", default=None,
                     help="provenance tag: the filename's run token AND the provenance_tag header attr. "
                          "Default: inherited from the store's provenance_tag (the ingest --tag); pass "
@@ -117,12 +128,15 @@ def main():
     ap.add_argument("--no-uncertainty", action="store_true",
                     help="skip the ensemble standard-deviation field DATA_SD (reads all members)")
     ap.add_argument("--ensemble", action="store_true",
-                    help="also write the full ensemble as OHCENS_<...>.nc, DATA(MEMBER,LON,LAT,TIME)")
+                    help="also write the full ensemble as <NAME>ENS_<...>.nc, DATA(MEMBER,LON,LAT,TIME)")
     ap.add_argument("--out", default=".")
     args = ap.parse_args()
 
     ds = xr.open_zarr(args.store, consolidated=False)  # decodes time -> datetime64
     g = ds.attrs
+    q = load_quantity(g)
+    prefix = q["name"].upper()                         # OHC_ / MLD_ …
+    unit_factor = float(q["publish_unit_factor"])      # stored units per published unit
     # Tag + provenance link default to what the ingest step stamped on the store; --tag/--provenance-link
     # override. The tag is the run token in the filename and the provenance_tag attr.
     tag = _sanitize_tag(args.tag if args.tag is not None else g.get("provenance_tag") or g.get("mapped_fields_tag") or "")
@@ -141,12 +155,12 @@ def main():
     mval = preset_mask_value(args.preset)
     masked = xr.DataArray((ds["mask_flags"].values.astype("uint8") & mval) != 0,
                           dims=("lat", "lon"))
-    data = ds["field_mean"].where(~masked) / TERA        # [time, lat, lon], TJ/m^2
+    data = ds["field_mean"].where(~masked) / unit_factor   # [time, lat, lon], published units
 
     # --- ensemble 1-sigma (the protocol's "associated uncertainties, where available") ---
     # ddof=1 (sample standard deviation); this reads all ensemble members.
     include_sd = not args.no_uncertainty and has_ens
-    sd = (ds["field_ensemble"].std("member", ddof=1).where(~masked) / TERA) if include_sd else None
+    sd = (ds["field_ensemble"].std("member", ddof=1).where(~masked) / unit_factor) if include_sd else None
 
     # --- time -> days since 1900-01-01 ---
     t = ds["time"].values                              # datetime64
@@ -179,32 +193,37 @@ def main():
     out["LATITUDE"].attrs = {"units": "degrees_north", "axis": "Y"}
     out["TIME"].attrs = {"units": "days since 1900-01-01 00:00:00",
                          "calendar": "proleptic_gregorian", "axis": "T"}
-    out["DATA"].attrs = {"units": "TJ/m^2", "long_name": "ocean heat content density"}
+    out["DATA"].attrs = {"units": q["publish_units"], "long_name": q["long_name"]}
     if include_sd:
         out["DATA_SD"].attrs = {
-            "units": "TJ/m^2",
-            "long_name": "ocean heat content density, ensemble standard deviation (1-sigma)",
+            "units": q["publish_units"],
+            "long_name": "%s, ensemble standard deviation (1-sigma)" % q["long_name"],
             "comment": "std across %d conditional-simulation members (ddof=1)" % ds.sizes["member"],
         }
     out.attrs = {
         "Conventions": "CF-1.8",
-        "experiment": args.experiment,
         "period": "%d_%d" % (y0, y1),
         "layer_m": "%s_%s" % (low, high),
         "source": g.get("source", ""),
         "var_name": g["var_name"],
         "model_name": g["model_name"],
         "mapped_layer": "%d_%d" % (int(g["layer_top"]), int(g["layer_bottom"])),
-        "cp0": g["cp0"], "rho0": g["rho0"],
+        "quantity": g["quantity"],                     # the ingest [quantity] table, rolled forward
         "mask_preset": args.preset,
         "mask_applied": " ".join(PRESETS[args.preset]),
         "provenance_tag": tag,                         # run token; pointer to the provenance record
         "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
+    if args.experiment:
+        out.attrs["experiment"] = args.experiment
     if prov_link:
         out.attrs["provenance_link"] = prov_link
     if include_sd:
         out.attrs["ensemble_size"] = int(ds.sizes["member"])
+    # legacy standalone copies of the cp0/rho0 scale terms, read by name downstream
+    for k in ("cp0", "rho0"):
+        if k in g:
+            out.attrs[k] = g[k]
 
     # --- provenance katamari: roll every upstream step's block forward untouched, then add ours ---
     # Each step namespaces its own local provenance by identity, so the chain accretes without
@@ -227,6 +246,8 @@ def main():
         "preset": args.preset,
         "mask_applied": PRESETS[args.preset],
         "mask_value": int(mval),
+        "publish_unit_factor": unit_factor,
+        "publish_units": q["publish_units"],
         "include_sd": bool(include_sd),
         "ensemble_written": bool(args.ensemble),
         "ensemble_size": int(ds.sizes["member"]) if has_ens else None,
@@ -235,7 +256,9 @@ def main():
         "source_store": os.path.abspath(args.store),
     }, **compact)
 
-    fname = "OHC_%s_%d_%d_lev%s_%s_exp%s.nc" % (tag, y0, y1, low, high, args.experiment)
+    exp_token = ("_exp%s" % args.experiment) if args.experiment else ""
+    stem = "%s_%d_%d_lev%s_%s%s.nc" % (tag, y0, y1, low, high, exp_token)
+    fname = "%s_%s" % (prefix, stem)
     path = os.path.join(args.out, fname)
     fill = np.float64(np.nan)
     chunk_enc = {"zlib": True, "complevel": 4, "_FillValue": fill}
@@ -248,7 +271,7 @@ def main():
 
     # --- optional: the full ensemble as a member-dimensioned sibling file ---
     if args.ensemble:
-        ens = (ds["field_ensemble"].where(~masked) / TERA).astype("float64")
+        ens = (ds["field_ensemble"].where(~masked) / unit_factor).astype("float64")
         ens = ens.transpose("member", "lon", "lat", "time").rename(
             {"member": "MEMBER", "lon": "LONGITUDE", "lat": "LATITUDE", "time": "TIME"})
         ens = ens.assign_coords(MEMBER=ds["member"].values,
@@ -261,14 +284,14 @@ def main():
         eds["TIME"].attrs = {"units": "days since 1900-01-01 00:00:00",
                              "calendar": "proleptic_gregorian", "axis": "T"}
         eds["MEMBER"].attrs = {"long_name": "conditional-simulation member"}
-        eds["DATA"].attrs = {"units": "TJ/m^2",
-                             "long_name": "ocean heat content density (per ensemble member)"}
+        eds["DATA"].attrs = {"units": q["publish_units"],
+                             "long_name": "%s (per ensemble member)" % q["long_name"]}
         eds.attrs = dict(out.attrs)
         eds.attrs["ensemble_size"] = int(ds.sizes["member"])
         eds.attrs["note"] = ("full conditional-simulation ensemble for per-member downstream "
                              "analysis; NOT a single-field ME4OH submission")
 
-        ename = "OHCENS_%s_%d_%d_lev%s_%s_exp%s.nc" % (tag, y0, y1, low, high, args.experiment)
+        ename = "%sENS_%s" % (prefix, stem)
         epath = os.path.join(args.out, ename)
         nlon, nlat, ntime = len(ds["lon"]), len(ds["lat"]), len(days1900)
         eenc = {"DATA": {"zlib": True, "complevel": 4, "_FillValue": np.float64(np.nan),

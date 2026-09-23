@@ -43,9 +43,11 @@ pub struct Quantity {
     /// named factors; their product scales the raw mapping values at ingest (empty = 1)
     #[serde(default = "default_scale_terms")]
     pub scale_terms: BTreeMap<String, f64>,
-    /// factor applied when publishing the store to a submission (OHC: J/m² → TJ/m²)
-    #[serde(default = "default_publish_scale")]
-    pub publish_scale: f64,
+    /// one published unit is this many stored units; publish divides by it (OHC: 1 TJ/m² =
+    /// 1e12 J/m²). A divisor rather than a multiplier because the powers of ten are exact in f64
+    /// this way round, so the published values are correctly rounded.
+    #[serde(default = "default_publish_unit_factor")]
+    pub publish_unit_factor: f64,
     /// units of the published field
     #[serde(default = "default_publish_units")]
     pub publish_units: String,
@@ -58,7 +60,7 @@ fn default_long_name() -> String { "ocean heat content".into() }
 fn default_scale_terms() -> BTreeMap<String, f64> {
     BTreeMap::from([("cp0".to_string(), crate::consts::CP0), ("rho0".to_string(), crate::consts::RHO0)])
 }
-fn default_publish_scale() -> f64 { 1e-12 }
+fn default_publish_unit_factor() -> f64 { 1e12 }
 fn default_publish_units() -> String { "TJ/m^2".into() }
 
 impl Quantity {
@@ -71,7 +73,7 @@ impl Quantity {
             units: default_units(),
             long_name: default_long_name(),
             scale_terms: default_scale_terms(),
-            publish_scale: default_publish_scale(),
+            publish_unit_factor: default_publish_unit_factor(),
             publish_units: default_publish_units(),
         }
     }
@@ -366,7 +368,7 @@ mod tests {
             "run_tag", "provenance_link", "code_version", "var_name", "model_name",
             "latitude_range_to_keep", "basins_to_remove", "bathy_clip_m",
             "dir_mean", "dir_ensemble", "dir_out", "etopo_path", "basinmask_path", "quantity",
-            "scale_terms", "cp0", "rho0", "publish_scale",
+            "scale_terms", "cp0", "rho0", "publish_unit_factor",
         ] {
             assert!(json.contains(key), "run_config missing {key}: {json}");
         }
@@ -397,13 +399,13 @@ mod tests {
              latitude_range_to_keep=[-64.5,64.5]\nbasins_to_remove=[0]\n\
              etopo_path='e'\nbasinmask_path='b'\n\
              [quantity]\nname='mld'\nkind='intensive'\nunits='m'\nlong_name='mixed layer depth'\n\
-             scale_terms={}\npublish_scale=1.0\npublish_units='m'\n",
+             scale_terms={}\npublish_unit_factor=1.0\npublish_units='m'\n",
         ).unwrap();
         let q = &cfg.quantity;
         assert_eq!(q.kind, Kind::Intensive);
         assert_eq!(q.scale(), 1.0);
         assert!(q.scale_terms.is_empty());
-        assert_eq!(q.publish_scale, 1.0);
+        assert_eq!(q.publish_unit_factor, 1.0);
         // a partial table keeps the defaults for what it omits
         let cfg: RunConfig = toml::from_str(
             "var_name='x'\nmodel_name='y'\nlatitude_range_to_keep=[-64.5,64.5]\nbasins_to_remove=[0]\n\

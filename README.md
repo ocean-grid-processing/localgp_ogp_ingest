@@ -174,7 +174,7 @@ downstream step can look a term up by name. Omit the table for the OHC defaults;
 | `units` | `J/m2` | units of the stored, scaled field |
 | `long_name` | `ocean heat content` | |
 | `scale_terms` | `{ cp0 = 3989.244, rho0 = 1030.0 }` | named factors; their product is the ingest scale (empty = 1) |
-| `publish_scale` | `1e-12` | factor applied when publishing the store to a submission (J/m² → TJ/m²) |
+| `publish_unit_factor` | `1e12` | one published unit is this many stored units; publish divides by it (1 TJ/m² = 1e12 J/m²) |
 | `publish_units` | `TJ/m^2` | units of the published field |
 `--no-ensemble` is for mean-only products or an incomplete CondSim set:
 `publish.py` then emits `DATA` without `DATA_SD`, and `--ensemble` on such a store errors.
@@ -210,8 +210,9 @@ The python environment for performing integrity crosschecks and publishing to an
 ##### publish.py — make the ME4OH submission
 
 Projects a store to a compliant `.nc`: collapses the selected mask bits to NaN, converts
-J/m² → TJ/m² and the time axis to days-since-1900, and writes `DATA(LONGITUDE, LATITUDE, TIME)`
-(float64 by default) under the ME4OH filename. By default it also adds `DATA_SD` (ensemble 1σ —
+the stored units to the published ones (dividing by the quantity's `publish_unit_factor`, e.g.
+J/m² → TJ/m²) and the time axis to days-since-1900, and writes `DATA(LONGITUDE, LATITUDE, TIME)`
+(float64 by default) under `<NAME>_<tag>_<Y0>_<Y1>_lev<low>_<high>[_exp<X>].nc`, where `NAME` is the quantity's `name` upper-cased (`OHC_`, `MLD_`). The `quantity` attr is carried onto the submission. By default it also adds `DATA_SD` (ensemble 1σ —
 the protocol's "associated uncertainties, where available"), computed from `field_ensemble`. See [`publish.slurm`](publish.slurm) for a submission example.
 
 ###### Script options:
@@ -219,14 +220,14 @@ the protocol's "associated uncertainties, where available"), computed from `fiel
 | option | default | effect |
 |---|---|---|
 | `STORE.zarr` (positional) | *(required)* | the input zarr store |
-| `--experiment` | *(required)* | ME4OH experiment letter (`A`/`B`/…) — the `exp<X>` filename token |
-| `--tag` | *inherited from the store's `provenance_tag`* | provenance tag: the **run token** in the filename (`OHC_<tag>_…_exp<X>.nc`) **and** the `provenance_tag` header attr. Defaults to what the ingest `--tag` stamped on the store; pass only to override. |
+| `--experiment` | *(none)* | ME4OH experiment letter (`A`/`B`/…) — adds the `exp<X>` filename token and the `experiment` attr. Omit for a product that isn't an ME4OH submission. |
+| `--tag` | *inherited from the store's `provenance_tag`* | provenance tag: the **run token** in the filename (`<NAME>_<tag>_…[_exp<X>].nc`) **and** the `provenance_tag` header attr. Defaults to what the ingest `--tag` stamped on the store; pass only to override. |
 | `--provenance-link` | *inherited from the store's `provenance_link`* | URL/path to the provenance record; written to the `provenance_link` header attr. Pass only to override. |
 | `--code-version` | *(required)* | URL to the exact publish code (commit/release); stamped as `localgp_publish_code_version`. This step's own code, distinct from the store's ingest code version. |
 | `--preset` | `me4oh` | which mask bits collapse to NaN — `me4oh` or `wmo` (see below) |
 | `--levels LOW,HIGH` | store's layer bounds | override the filename's layer bounds (meters) |
 | `--no-uncertainty` | off | skip `DATA_SD` (and the full-ensemble read) |
-| `--ensemble` | off | also write the full ensemble sibling `OHCENS_<...>.nc` (see below) |
+| `--ensemble` | off | also write the full ensemble sibling `<NAME>ENS_<...>.nc` (see below) |
 | `--out` | `.` | output directory |
 
 **Provenance chain.** The submission carries the store's `localgp_ingest_run_config` /
@@ -248,7 +249,7 @@ Exact bit subsets in
 
 **Mean-only stores:** a store produced by the rust with `--no-ensemble` has no `field_ensemble`; publish detects this, writes `DATA` without `DATA_SD` (with a note), and `--ensemble` on such a store is an error.
 
-`--ensemble` writes the full ensemble as a sibling `OHCENS_<...>.nc` with
+`--ensemble` writes the full ensemble as a sibling `<NAME>ENS_<...>.nc` with
 `DATA(MEMBER, LONGITUDE, LATITUDE, TIME)` — same mask, units (f64), and time axis as the
 submission — for downstream uses that derive per-member quantities before collapsing to a spread.
 It is not an ME4OH submission (distinct filename, extra dimension), so the assessment's `OHC_*.nc`
@@ -267,13 +268,13 @@ oracles; both load sizeable arrays, so run them inside the job allocation.
   value conventions in the log, so a change upstream (a numeric fill instead of NaN, a sign flip, an
   unphysical range for the mapped quantity) is visible here.
 - **`verify_publish.py`** — the same three positional args, plus `--no-sd` (skip the `DATA_SD`
-  check) and `--ensemble` (also check the `OHCENS_<...>.nc` sibling member-by-member).
+  check) and `--ensemble` (also check the `<NAME>ENS_<...>.nc` sibling member-by-member).
 
 Complete cluster jobs: [`verify_store.slurm`](verify_store.slurm) and
 [`verify_publish.slurm`](verify_publish.slurm).
 
 **Tolerances** track the stored precision, not bit-for-bit. `verify_store` compares at float32
 precision (both sides cast; exact match expected). `verify_publish` adapts to each variable's stored
-dtype — for float64 (the default) `DATA`/`OHCENS` match to ~1e-12 and `DATA_SD` to ~1e-9 (a std
+dtype — for float64 (the default) `DATA`/`ENS` match to ~1e-12 and `DATA_SD` to ~1e-9 (a std
 cancels more), and ~1e-6 for float32 (the float32 `/1e12` rounding). A real bug (transpose flip,
 unit error, wrong month) is still caught.

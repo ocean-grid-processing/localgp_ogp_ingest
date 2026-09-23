@@ -99,7 +99,7 @@ model_name        = "<model>"      # e.g. SpaceTimeTrend
 layer_top         = <top>          # dbar, shallow edge
 layer_bottom      = <bottom>       # dbar, deep edge
 domain            = "lon 20.5..379.5E, lat -89.5..89.5N, 1deg"
-quantity          = "<json>"       # the [quantity] table: name, kind, units, long_name, scale_terms, publish_scale, publish_units
+quantity          = "<json>"       # the [quantity] table: name, kind, units, long_name, scale_terms, publish_unit_factor, publish_units
 cp0               = 3989.244       # J/(kg K)  — legacy standalone copies of the scale_terms of those
 rho0              = 1030           # kg/m3       names, written only when the quantity has them
 

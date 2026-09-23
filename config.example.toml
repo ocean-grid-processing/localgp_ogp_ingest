@@ -30,12 +30,12 @@ basinmask_path = "/path/to/data/basinmask_04.msk"
 # `scale_terms` at ingest; the names are kept in the provenance so the physics stays legible.
 # Omit the whole table for the OHC defaults shown here; an empty `scale_terms = {}` stores the
 # mapping values as they are (e.g. a mixed layer depth: name = "mld", kind = "intensive",
-# units = "m", publish_scale = 1.0, publish_units = "m").
+# units = "m", publish_unit_factor = 1.0, publish_units = "m").
 [quantity]
 name          = "ohc"
 kind          = "extensive"        # extensive (per-area density) | intensive (per-cell value)
 units         = "J/m2"             # units of the stored, scaled field
 long_name     = "ocean heat content"
 scale_terms   = { cp0 = 3989.244, rho0 = 1030.0 }   # J/(kg K) × kg/m3: K·m -> J/m2
-publish_scale = 1e-12              # store -> submission (J/m2 -> TJ/m2)
+publish_unit_factor = 1e12         # one published unit = this many stored units (1 TJ/m2 = 1e12 J/m2)
 publish_units = "TJ/m^2"
