@@ -32,7 +32,7 @@ For one mapped layer:
 1. Read the LocalGP `.mat` files (FullField mean + the LocalCondSim ensemble, whose size is read
    from the files — 100 members to date), month by
    month.
-2. Convert integrated temperature to OHC (`× cp0 × rho0`), preserving NaNs.
+2. Scale the raw values by the configured quantity's factor (OHC: `× cp0 × rho0`), preserving NaNs.
 3. Transpose month-major input → member-major arrays (buffer the whole layer in RAM).
 4. Derive ancillary grids (`etopo`, `basin_id`, `cell_area`) and the `mask_flags` bit band.
 5. Write a per-layer zarr v3 store. **No masks are applied to the data** — masking is carried in
@@ -157,6 +157,24 @@ echoed in the run banner.
 | output dir | `--dir_out` | `OHC_DIR_OUT` ¹ | config / `.` | where the zarr store is written |
 
 ¹ path env vars apply **only when no `config.toml` is passed**; `--dir_*` flags override regardless.
+
+###### The `[quantity]` table
+
+What the mapped grid is and how it is scaled. Every raw mapping value is multiplied by the
+product of `scale_terms` at ingest; the terms are kept by name (not just their product) in the
+store's `quantity` attr and in `run_config`, so the physics stays legible in the provenance and a
+downstream step can look a term up by name. Omit the table for the OHC defaults; give
+`scale_terms = {}` to store the mapping values as they are.
+
+| key | default | effect |
+|---|---|---|
+| `name` | `ohc` | short slug for the quantity |
+| `kind` | `extensive` | `extensive` (a per-area density that sums over area and stacks over layers) or `intensive` (a per-cell value, e.g. a mixed layer depth). Recorded for downstream stages; ingest treats both alike |
+| `units` | `J/m2` | units of the stored, scaled field |
+| `long_name` | `ocean heat content` | |
+| `scale_terms` | `{ cp0 = 3989.244, rho0 = 1030.0 }` | named factors; their product is the ingest scale (empty = 1) |
+| `publish_scale` | `1e-12` | factor applied when publishing the store to a submission (J/m² → TJ/m²) |
+| `publish_units` | `TJ/m^2` | units of the published field |
 `--no-ensemble` is for mean-only products or an incomplete CondSim set:
 `publish.py` then emits `DATA` without `DATA_SD`, and `--ensemble` on such a store errors.
 
@@ -175,8 +193,7 @@ config sets them; in no-config mode the listed default applies.
 | `etopo_path` | `etopo60.cdf` | req | bathymetry grid; env `OHC_ETOPO` in no-config mode |
 | `basinmask_path` | `basinmask_04.msk` | req | basin table; env `OHC_BASINMASK` in no-config mode |
 | `bathy_clip_m` | *(none = off)* | | uniform clip depth (m) → the `bed_above_clip` bit; WMO/GCOS uses `300.0` |
-| `cp0` | `3989.244` | | OHC scale `cp0·rho0`, J/(kg·K) |
-| `rho0` | `1030.0` | | OHC scale `cp0·rho0`, kg/m³ |
+| `[quantity]` | *(the OHC product)* | | the mapped quantity and its scaling — see the table below |
 | `dir_mean` / `dir_ensemble` / `dir_out` | `.` | | I/O directories (usually set per-run via the `--dir_*` flags above) |
 
 ### Pythonic publish (.zarr -> .nc) & crosschecks (.mat vs .zarr and .mat vs .nc)

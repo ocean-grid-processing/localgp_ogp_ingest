@@ -6,7 +6,8 @@
 //!   - `ohc_mean`     `[time, lat, lon]`          (the FullField posterior mean)
 //!   - `ohc_ensemble` `[member, time, lat, lon]`  (the conditional simulations)
 //! The ensemble size is read from the first month's file and every later month must match it.
-//! Integrated temperature is converted to OHC (`* cp0 * rho0`) on the way in; NaN is the
+//! Raw mapping values are scaled by the configured quantity's factor (OHC: `cp0 * rho0`) on the
+//! way in; NaN is the
 //! mapping's missing value and is preserved as NaN; arrays are transposed from
 //! the `.mat`'s `[lon, lat]` order to `[lat, lon]`. Both mean and ensemble are stored f64
 //! (~13.7 GB for 264 months × 100 members — the RAM bet on the cluster).
@@ -45,7 +46,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
     let nlon = grid.nlon();
     let time = slice.time_axis();
     let nt = time.len();
-    let scale = cfg.cp0 * cfg.rho0;
+    let scale = cfg.quantity.scale();
 
     let mut ohc_mean = Array3::<f64>::from_elem((nt, nlat, nlon), f64::NAN);
     // Allocated on the first ensemble read, once the member count is known from the file.
@@ -119,7 +120,7 @@ mod tests {
 
         // Validate transpose + scale by reading the one local month directly.
         let mean = matread::read_mean_grid(cfg.mat_path(&layer, 2016, 8, false)).unwrap();
-        let scale = cfg.cp0 * cfg.rho0;
+        let scale = cfg.quantity.scale();
         // raw m[200,100]=144.646083 → ohc at [lat=100, lon=200]
         let ohc = mean[[200, 100]] * scale;
         assert!((ohc - 5.943_394e8).abs() / 5.943_394e8 < 1e-5);

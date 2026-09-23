@@ -75,7 +75,7 @@ Codecs: `bytes` (little-endian) + `gzip` — pure Rust (no Blosc/HDF5), read nat
 
 ## Data conventions
 
-- OHC stored in **J/m²** (after `cp0·rho0`); `cp0`/`rho0` are group attributes, so the scaling
+- OHC stored in **J/m²** (after `cp0·rho0`); the `quantity` attr carries the scale terms by name (and `cp0`/`rho0` are also standalone attrs), so the scaling
   is invertible.
 - **Absolute, not anomaly** — anomaly referencing is a downstream choice.
 - The **full ensemble** is kept (every member the mapping files held); std / percentiles derive on read.
@@ -95,9 +95,10 @@ var_name          = "<var>"        # e.g. potentialTemperature
 model_name        = "<model>"      # e.g. SpaceTimeTrend
 layer_top         = <top>          # dbar, shallow edge
 layer_bottom      = <bottom>       # dbar, deep edge
-cp0               = 3989.244       # J/(kg K)
-rho0              = 1030           # kg/m3
 domain            = "lon 20.5..379.5E, lat -89.5..89.5N, 1deg"
+quantity          = "<json>"       # the [quantity] table: name, kind, units, long_name, scale_terms, publish_scale, publish_units
+cp0               = 3989.244       # J/(kg K)  — legacy standalone copies of the scale_terms of those
+rho0              = 1030           # kg/m3       names, written only when the quantity has them
 
 # stage-namespaced local provenance (STAGE = "localgp_ingest"):
 localgp_ingest_code_version = "<url>"   # exact ohc_ingest code (commit/release); --code-version

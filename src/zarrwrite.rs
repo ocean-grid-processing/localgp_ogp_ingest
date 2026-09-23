@@ -190,10 +190,19 @@ pub fn write_layer_store(
         "model_name": cfg.model_name,
         "layer_top": layer.top,
         "layer_bottom": layer.bottom,
-        "cp0": cfg.cp0,
-        "rho0": cfg.rho0,
         "domain": "lon 20.5..379.5E, lat -89.5..89.5N, 1deg",
+        // the mapped quantity and its scaling, as one compact JSON string (travels unchanged into
+        // the downstream netCDF attrs, like the provenance blocks)
+        "quantity": serde_json::to_string(&cfg.quantity).context("serializing quantity")?,
     });
+    // Legacy standalone attrs for readers that still look them up by name (publish, verify,
+    // derive, gcos); present only when the quantity has these terms.
+    if let (Some(obj), Some(cp0), Some(rho0)) =
+        (group_attrs.as_object_mut(), cfg.quantity.term("cp0"), cfg.quantity.term("rho0"))
+    {
+        obj.insert("cp0".into(), json!(cp0));
+        obj.insert("rho0".into(), json!(rho0));
+    }
     // Stage-namespaced local provenance — keyed off STAGE so a binary rename doesn't move them, and
     // so downstream steps can roll every `*_run_config` / `_run_facts` / `_code_version` forward as-is.
     if let Some(obj) = group_attrs.as_object_mut() {

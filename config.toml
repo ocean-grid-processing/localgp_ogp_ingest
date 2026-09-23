@@ -19,4 +19,16 @@ bathy_clip_m = 300
 etopo_path     = "/scratch/alpine/wimi7695/ohc_prod/params/etopo60.cdf"
 basinmask_path = "/scratch/alpine/wimi7695/ohc_prod/params/basinmask_04.msk"
 
-# Optional (defaults shown): cp0 = 3989.244, rho0 = 1030.0
+# The mapped quantity and its scaling. Every raw mapping value is multiplied by the product of
+# `scale_terms` at ingest; the names are kept in the provenance so the physics stays legible.
+# Omit the whole table for the OHC defaults shown here; an empty `scale_terms = {}` stores the
+# mapping values as they are (e.g. a mixed layer depth: name = "mld", kind = "intensive",
+# units = "m", publish_scale = 1.0, publish_units = "m").
+[quantity]
+name          = "ohc"
+kind          = "extensive"        # extensive (per-area density) | intensive (per-cell value)
+units         = "J/m2"             # units of the stored, scaled field
+long_name     = "ocean heat content"
+scale_terms   = { cp0 = 3989.244, rho0 = 1030.0 }   # J/(kg K) × kg/m3: K·m -> J/m2
+publish_scale = 1e-12              # store -> submission (J/m2 -> TJ/m2)
+publish_units = "TJ/m^2"
