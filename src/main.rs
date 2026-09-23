@@ -18,7 +18,7 @@
 //! `localgp_ingest_run_facts` (the discovered axis, layer, ensemble size, grid) as compact JSON-string
 //! attrs — this step's local provenance, namespaced so downstream steps roll it forward untouched.
 //! `--no-ensemble` (or `OHC_NO_ENSEMBLE`) ingests the mean only — skips the LocalCondSim files
-//! and omits `ohc_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
+//! and omits `field_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
 //! Static constants + paths come from `config.toml`, or from the defaults + path env vars
 //! (`OHC_DIR_MEAN`, `OHC_DIR_ENSEMBLE`, `OHC_DIR_OUT`, `OHC_ETOPO`, `OHC_BASINMASK`) when no
 //! config is given. `--dir_mean`, `--dir_ensemble`, `--dir_out` override those directories on the
@@ -200,9 +200,9 @@ fn main() -> Result<()> {
         if cli.no_ensemble { " (mean-only, --no-ensemble)" } else { "" });
     let data = ingest::ingest_layer(&cfg, &slice, &grid, cli.no_ensemble)
         .with_context(|| format!("ingesting layer {}", slice.layer.tag()))?;
-    let (never, incomplete) = masks::compute_validity(&data.ohc_mean);
+    let (never, incomplete) = masks::compute_validity(&data.field_mean);
     // Union the member NaN footprints (matches the original's mean∪members mask); None if mean-only.
-    let ens_incomplete = data.ohc_ensemble.as_ref().map(masks::compute_ensemble_incomplete);
+    let ens_incomplete = data.field_ensemble.as_ref().map(masks::compute_ensemble_incomplete);
     let flags = masks::build_flags(
         &grid, &slice.layer, &etopo, Some(&basin_id),
         cfg.latitude_range_to_keep, &cfg.basins_to_remove, cfg.bathy_clip_m, &never, &incomplete,

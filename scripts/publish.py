@@ -130,23 +130,23 @@ def main():
         raise SystemExit("no provenance tag: pass --tag, or ingest the store with --tag so it carries "
                          "provenance_tag")
     prov_link = args.provenance_link if args.provenance_link is not None else g.get("provenance_link")
-    has_ens = "ohc_ensemble" in ds.data_vars           # False for mean-only (--no-ensemble) stores
+    has_ens = "field_ensemble" in ds.data_vars           # False for mean-only (--no-ensemble) stores
     if args.ensemble and not has_ens:
-        raise SystemExit("--ensemble requested but %s has no ohc_ensemble "
+        raise SystemExit("--ensemble requested but %s has no field_ensemble "
                          "(ingested with --no-ensemble)" % args.store)
     if not has_ens and not args.no_uncertainty:
-        print("note: mean-only store (no ohc_ensemble) — writing DATA without DATA_SD")
+        print("note: mean-only store (no field_ensemble) — writing DATA without DATA_SD")
 
     # --- collapse the selected mask bits to NaN ---
     mval = preset_mask_value(args.preset)
     masked = xr.DataArray((ds["mask_flags"].values.astype("uint8") & mval) != 0,
                           dims=("lat", "lon"))
-    data = ds["ohc_mean"].where(~masked) / TERA        # [time, lat, lon], TJ/m^2
+    data = ds["field_mean"].where(~masked) / TERA        # [time, lat, lon], TJ/m^2
 
     # --- ensemble 1-sigma (the protocol's "associated uncertainties, where available") ---
     # ddof=1 (sample standard deviation); this reads all ensemble members.
     include_sd = not args.no_uncertainty and has_ens
-    sd = (ds["ohc_ensemble"].std("member", ddof=1).where(~masked) / TERA) if include_sd else None
+    sd = (ds["field_ensemble"].std("member", ddof=1).where(~masked) / TERA) if include_sd else None
 
     # --- time -> days since 1900-01-01 ---
     t = ds["time"].values                              # datetime64
@@ -248,7 +248,7 @@ def main():
 
     # --- optional: the full ensemble as a member-dimensioned sibling file ---
     if args.ensemble:
-        ens = (ds["ohc_ensemble"].where(~masked) / TERA).astype("float64")
+        ens = (ds["field_ensemble"].where(~masked) / TERA).astype("float64")
         ens = ens.transpose("member", "lon", "lat", "time").rename(
             {"member": "MEMBER", "lon": "LONGITUDE", "lat": "LATITUDE", "time": "TIME"})
         ens = ens.assign_coords(MEMBER=ds["member"].values,

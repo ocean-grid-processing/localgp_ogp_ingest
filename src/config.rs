@@ -191,11 +191,12 @@ impl RunConfig {
     }
 
     /// zarr store directory for a layer. `years` is the discovered `[Ymin, Ymax]` data span, so the
-    /// store name carries the years it covers: `ohc_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr`.
+    /// store name carries the years it covers: `<quantity>_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr`
+    /// (the leading token is the quantity's `name`, e.g. `ohc`).
     pub fn store_path(&self, layer: &LayerSpec, years: [i32; 2]) -> PathBuf {
         self.dir_out.join(format!(
-            "ohc_{}_{}_{}_plev{}.zarr",
-            self.run_tag, years[0], years[1], layer.tag()
+            "{}_{}_{}_{}_plev{}.zarr",
+            self.quantity.name, self.run_tag, years[0], years[1], layer.tag()
         ))
     }
 
@@ -496,6 +497,16 @@ mod tests {
         assert!(cfg.discover_years(&layer, false).is_err());
 
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn store_path_leads_with_the_quantity_name() {
+        let mut c = RunConfig::defaults();
+        c.run_tag = "OP1".into();
+        let l = LayerSpec { top: 15, bottom: 20 };
+        assert!(c.store_path(&l, [2004, 2005]).ends_with("ohc_OP1_2004_2005_plev15_20.zarr"));
+        c.quantity.name = "mld".into();
+        assert!(c.store_path(&l, [2004, 2005]).ends_with("mld_OP1_2004_2005_plev15_20.zarr"));
     }
 
     #[test]

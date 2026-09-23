@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Full round-trip check: does every grid point of the zarr match the upstream .mat?
 
-Compares the entire store against the LocalGP .mat files — all timesteps of ohc_mean, and all
-100 members at all timesteps of ohc_ensemble — for exact equality (after cp0*rho0 and the
+Compares the entire store against the LocalGP .mat files — all timesteps of field_mean, and all
+100 members at all timesteps of field_ensemble — for exact equality (after cp0*rho0 and the
 lon/lat transpose). Uses scipy.io.loadmat as an independent reader (not our Rust parser), and
 opens the store via xarray/zarr (the same path the downstream consumer uses).
 
@@ -83,7 +83,7 @@ def main(store, dir_mean, dir_ensemble):
     var = ds.attrs["var_name"]
     model = ds.attrs["model_name"]
     scale = cp0 * rho0
-    has_ens = "ohc_ensemble" in ds        # mean-only stores (ingested --no-ensemble) omit it
+    has_ens = "field_ensemble" in ds        # mean-only stores (ingested --no-ensemble) omit it
 
     units = ds["time"].attrs["units"]            # "days since YYYY-MM-15"
     y0, m0, d0 = (int(x) for x in units.split("since")[1].strip().split("-"))
@@ -97,9 +97,9 @@ def main(store, dir_mean, dir_ensemble):
     # Read each side once: full store into memory, then stream the month-major .mat.
     if has_ens:
         print("loading full store into memory (~%.1f GB)…"
-              % (ds["ohc_ensemble"].size * 4 / 1e9))
-    zmean_all = ds["ohc_mean"].values            # [time, lat, lon]
-    zens_all = ds["ohc_ensemble"].values if has_ens else None   # [member, time, lat, lon]
+              % (ds["field_ensemble"].size * 4 / 1e9))
+    zmean_all = ds["field_mean"].values            # [time, lat, lon]
+    zens_all = ds["field_ensemble"].values if has_ens else None   # [member, time, lat, lon]
 
     worst_mean = 0.0
     worst_ens = 0.0
@@ -117,8 +117,8 @@ def main(store, dir_mean, dir_ensemble):
         tally_mean.add(raw_mean, year, month)
         mat_mean = raw_mean * scale
         ok, md = compare(mat_mean, zmean_all[t])
-        assert ok, "ohc_mean NaN footprint differs at %04d-%02d" % (year, month)
-        assert md == 0.0, "ohc_mean differs at %04d-%02d (max %g)" % (year, month, md)
+        assert ok, "field_mean NaN footprint differs at %04d-%02d" % (year, month)
+        assert md == 0.0, "field_mean differs at %04d-%02d (max %g)" % (year, month, md)
         worst_mean = max(worst_mean, md)
 
         # ensemble: [lon, lat, member] -> [member, lat, lon]  (skipped for mean-only stores)
@@ -127,8 +127,8 @@ def main(store, dir_mean, dir_ensemble):
             tally_ens.add(raw_ens, year, month)
             mat_ens = raw_ens * scale
             ok, md = compare(mat_ens, zens_all[:, t])
-            assert ok, "ohc_ensemble NaN footprint differs at %04d-%02d" % (year, month)
-            assert md == 0.0, "ohc_ensemble differs at %04d-%02d (max %g)" % (year, month, md)
+            assert ok, "field_ensemble NaN footprint differs at %04d-%02d" % (year, month)
+            assert md == 0.0, "field_ensemble differs at %04d-%02d (max %g)" % (year, month, md)
             worst_ens = max(worst_ens, md)
 
         if (t + 1) % 24 == 0 or t == nt - 1:
@@ -140,10 +140,10 @@ def main(store, dir_mean, dir_ensemble):
         tally_ens.report("ensemble")
 
     if has_ens:
-        print("PASS — %d timesteps × %d members; ohc_mean max diff=%g, ohc_ensemble max diff=%g"
+        print("PASS — %d timesteps × %d members; field_mean max diff=%g, field_ensemble max diff=%g"
               % (nt, ds.sizes["member"], worst_mean, worst_ens))
     else:
-        print("PASS — %d timesteps, mean-only; ohc_mean max diff=%g" % (nt, worst_mean))
+        print("PASS — %d timesteps, mean-only; field_mean max diff=%g" % (nt, worst_mean))
 
 
 if __name__ == "__main__":

@@ -3,12 +3,12 @@
 //!
 //! LocalGP delivers one `.mat` per month (the ensemble file holds every member for that
 //! month). Our zarr chunks are per-member, so we accumulate the full layer and emit:
-//!   - `ohc_mean`     `[time, lat, lon]`          (the FullField posterior mean)
-//!   - `ohc_ensemble` `[member, time, lat, lon]`  (the conditional simulations)
-//! The ensemble size is read from the first month's file and every later month must match it.
+//!   - `field_mean`     `[time, lat, lon]`          (the FullField posterior mean)
+//!   - `field_ensemble` `[member, time, lat, lon]`  (the conditional simulations)
+//! The arrays are named generically; the store's `quantity` attr says what the field is. The
+//! ensemble size is read from the first month's file and every later month must match it.
 //! Raw mapping values are scaled by the configured quantity's factor (OHC: `cp0 * rho0`) on the
-//! way in; NaN is the
-//! mapping's missing value and is preserved as NaN; arrays are transposed from
+//! way in; NaN is the mapping's missing value and is preserved as NaN; arrays are transposed from
 //! the `.mat`'s `[lon, lat]` order to `[lat, lon]`. Both mean and ensemble are stored f64
 //! (~13.7 GB for 264 months × 100 members — the RAM bet on the cluster).
 
@@ -19,20 +19,20 @@ use crate::config::{RunConfig, Slice};
 use crate::{matread, GridDef};
 
 pub struct LayerData {
-    /// `[time, lat, lon]`, OHC J/m², NaN preserved. f64: the deliverable takes a large-mean
+    /// `[time, lat, lon]`, in the quantity's stored units (OHC: J/m²), NaN preserved. f64: the deliverable takes a large-mean
     /// anomaly (absolute OHC − baseline), so the mean is kept double all the way through.
-    pub ohc_mean: Array3<f64>,
-    /// `[member, time, lat, lon]`, OHC J/m², NaN preserved. f64 (matches the mean): the ensemble
+    pub field_mean: Array3<f64>,
+    /// `[member, time, lat, lon]`, same units as the mean, NaN preserved. f64 (matches the mean): the ensemble
     /// feeds the `_sd` spread and the downstream yearly/trend uncertainties, kept double so those
     /// are exact rather than f32-limited. `None` when ingested mean-only (`--no-ensemble`) — the
-    /// CondSim files are not read and `ohc_ensemble` is omitted from the store.
-    pub ohc_ensemble: Option<Array4<f64>>,
+    /// CondSim files are not read and `field_ensemble` is omitted from the store.
+    pub field_ensemble: Option<Array4<f64>>,
 }
 
 /// Read every month of the slice's layer and assemble the member-major arrays.
 ///
 /// `mean_only` (from `--no-ensemble`) skips the LocalCondSim files entirely and returns
-/// `ohc_ensemble: None` — for mean-only products (e.g. the GCOS deliverable) where the ensemble
+/// `field_ensemble: None` — for mean-only products (e.g. the GCOS deliverable) where the ensemble
 /// is never used downstream, and to run without a complete set of CondSim `.mat` files.
 ///
 /// Missing values arrive as NaN and stay NaN (LocalGP marks missing with NaN); no other value is
@@ -48,9 +48,9 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
     let nt = time.len();
     let scale = cfg.quantity.scale();
 
-    let mut ohc_mean = Array3::<f64>::from_elem((nt, nlat, nlon), f64::NAN);
+    let mut field_mean = Array3::<f64>::from_elem((nt, nlat, nlon), f64::NAN);
     // Allocated on the first ensemble read, once the member count is known from the file.
-    let mut ohc_ensemble: Option<Array4<f64>> = None;
+    let mut field_ensemble: Option<Array4<f64>> = None;
 
     for (t, &(year, month)) in time.iter().enumerate() {
         // FullField mean: [lon, lat]
@@ -61,7 +61,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
         for j in 0..nlat {
             for i in 0..nlon {
                 let v = mean[[i, j]]; // transpose [lon,lat]→[lat,lon]
-                ohc_mean[[t, j, i]] = v * scale; // NaN stays NaN
+                field_mean[[t, j, i]] = v * scale; // NaN stays NaN
             }
         }
 
@@ -71,7 +71,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
             let ens = matread::read_ensemble(&ens_path)
                 .with_context(|| format!("reading {}", ens_path.display()))?;
             let (_, _, nm) = ens.dim();
-            if let Some(arr) = ohc_ensemble.as_ref() {
+            if let Some(arr) = field_ensemble.as_ref() {
                 let expected = arr.shape()[0];
                 if nm != expected {
                     bail!(
@@ -81,7 +81,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
                     );
                 }
             }
-            let ens_arr = ohc_ensemble.get_or_insert_with(|| {
+            let ens_arr = field_ensemble.get_or_insert_with(|| {
                 eprintln!("ensemble size: {nm} members (from {})", ens_path.display());
                 Array4::<f64>::from_elem((nm, nt, nlat, nlon), f64::NAN)
             });
@@ -97,7 +97,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
         }
     }
 
-    Ok(LayerData { ohc_mean, ohc_ensemble })
+    Ok(LayerData { field_mean, field_ensemble })
 }
 
 #[cfg(test)]

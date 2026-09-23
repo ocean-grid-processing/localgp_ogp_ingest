@@ -50,10 +50,11 @@ Full provenance, versions, and citations are in [`data/README.md`](data/README.m
 
 ## Output (the zarr store)
 
-`ohc_<tag>_<Ymin>_<Ymax>_plev<top>_<bottom>.zarr` (the years are the discovered data span), containing:
+`<quantity>_<tag>_<Ymin>_<Ymax>_plev<top>_<bottom>.zarr` (the leading token is the `[quantity]`
+`name`, e.g. `ohc`; the years are the discovered data span), containing:
 
-- `ohc_mean` `(time, lat, lon)` — the posterior-mean OHC, J/m², NaN preserved.
-- `ohc_ensemble` `(member, time, lat, lon)` — the conditional simulations (as many as the mapping
+- `field_mean` `(time, lat, lon)` — the posterior-mean field in the quantity's stored units (OHC: J/m²), NaN preserved.
+- `field_ensemble` `(member, time, lat, lon)` — the conditional simulations (as many as the mapping
   files held), chunked one file per member.
 - `mask_flags` `(lat, lon)` — the bit band, with CF `flag_masks`/`flag_meanings` (see
   [`mask_spec.md`](mask_spec.md)).
@@ -134,7 +135,7 @@ Settings fall into three kinds by where they live:
 
 | setting | CLI | env | example |
 |---|---|---|---|
-| run tag | `--tag` | `OHC_TAG` | `OP20260110` — names the store `ohc_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr` (years = discovered data span) and is written to the `provenance_tag` attr (whitespace-stripped, never lowercased — must match the provenance record char-for-char) |
+| run tag | `--tag` | `OHC_TAG` | `OP20260110` — names the store `<quantity>_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr` (years = discovered data span) and is written to the `provenance_tag` attr (whitespace-stripped, never lowercased — must match the provenance record char-for-char) |
 | provenance link | `--provenance-link` | `OHC_PROVENANCE_LINK` | URL/path to this run's documentation; written to the `provenance_link` attr |
 | code version | `--code-version` | `OHC_CODE_VERSION` | URL to the exact ohc_ingest code (commit/release); written to the `localgp_ingest_code_version` attr |
 | layer | `--layer` | `OHC_LAYER` | `15-300`, `300_700`, `700:1850` (integer dbar; exactly one; sep `-`/`_`/`:`) |
@@ -151,7 +152,7 @@ echoed in the run banner.
 
 | setting | CLI | env | default | effect |
 |---|---|---|---|---|
-| mean-only | `--no-ensemble` | `OHC_NO_ENSEMBLE` (set = on) | off | skip the LocalCondSim files; omit `ohc_ensemble` from the store |
+| mean-only | `--no-ensemble` | `OHC_NO_ENSEMBLE` (set = on) | off | skip the LocalCondSim files; omit `field_ensemble` from the store |
 | mean dir | `--dir_mean` | `OHC_DIR_MEAN` ¹ | config / `.` | FullField mean `.mat` directory |
 | ensemble dir | `--dir_ensemble` | `OHC_DIR_ENSEMBLE` ¹ | config / `.` | LocalCondSim `.mat` directory |
 | output dir | `--dir_out` | `OHC_DIR_OUT` ¹ | config / `.` | where the zarr store is written |
@@ -211,7 +212,7 @@ The python environment for performing integrity crosschecks and publishing to an
 Projects a store to a compliant `.nc`: collapses the selected mask bits to NaN, converts
 J/m² → TJ/m² and the time axis to days-since-1900, and writes `DATA(LONGITUDE, LATITUDE, TIME)`
 (float64 by default) under the ME4OH filename. By default it also adds `DATA_SD` (ensemble 1σ —
-the protocol's "associated uncertainties, where available"), computed from `ohc_ensemble`. See [`publish.slurm`](publish.slurm) for a submission example.
+the protocol's "associated uncertainties, where available"), computed from `field_ensemble`. See [`publish.slurm`](publish.slurm) for a submission example.
 
 ###### Script options:
 
@@ -245,7 +246,7 @@ latitude/basin-cropped product: it adds `outside_latitude`, `removed_basin`, `be
 Exact bit subsets in
 [`mask_spec.md`](mask_spec.md).
 
-**Mean-only stores:** a store produced by the rust with `--no-ensemble` has no `ohc_ensemble`; publish detects this, writes `DATA` without `DATA_SD` (with a note), and `--ensemble` on such a store is an error.
+**Mean-only stores:** a store produced by the rust with `--no-ensemble` has no `field_ensemble`; publish detects this, writes `DATA` without `DATA_SD` (with a note), and `--ensemble` on such a store is an error.
 
 `--ensemble` writes the full ensemble as a sibling `OHCENS_<...>.nc` with
 `DATA(MEMBER, LONGITUDE, LATITUDE, TIME)` — same mask, units (f64), and time axis as the
