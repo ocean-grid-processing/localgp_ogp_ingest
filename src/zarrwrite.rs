@@ -195,14 +195,6 @@ pub fn write_layer_store(
         // the downstream netCDF attrs, like the provenance blocks)
         "quantity": serde_json::to_string(&cfg.quantity).context("serializing quantity")?,
     });
-    // Legacy standalone attrs for readers that still look them up by name (publish, verify,
-    // derive, gcos); present only when the quantity has these terms.
-    if let (Some(obj), Some(cp0), Some(rho0)) =
-        (group_attrs.as_object_mut(), cfg.quantity.term("cp0"), cfg.quantity.term("rho0"))
-    {
-        obj.insert("cp0".into(), json!(cp0));
-        obj.insert("rho0".into(), json!(rho0));
-    }
     // Stage-namespaced local provenance — keyed off STAGE so a binary rename doesn't move them, and
     // so downstream steps can roll every `*_run_config` / `_run_facts` / `_code_version` forward as-is.
     if let Some(obj) = group_attrs.as_object_mut() {

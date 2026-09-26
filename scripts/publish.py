@@ -257,10 +257,6 @@ def main():
         out.attrs["provenance_link"] = prov_link
     if include_sd:
         out.attrs["ensemble_size"] = int(ds.sizes["member"])
-    # legacy standalone copies of the cp0/rho0 scale terms, read by name downstream
-    for k in ("cp0", "rho0"):
-        if k in g:
-            out.attrs[k] = g[k]
 
     # --- provenance katamari: roll every upstream step's block forward untouched, then add ours ---
     # Each step namespaces its own local provenance by identity, so the chain accretes without

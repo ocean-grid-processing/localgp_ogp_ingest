@@ -16,4 +16,12 @@ module load anaconda/2023.09
 conda activate ohc_crosscheck
 
 cd $SLURM_SUBMIT_DIR
-python scripts/verify_publish.py $1 $2 $3
+# $1 is a filename pattern for the submission (run.sh builds it from the quantity name, tag and layer);
+# it must match exactly one file — results dirs hold many runs, so anything else is an error, not a guess.
+shopt -s nullglob
+subs=( $1 )
+if [ ${#subs[@]} -ne 1 ]; then
+  echo "expected exactly one submission matching $1; found ${#subs[@]}: ${subs[*]}" >&2
+  exit 1
+fi
+python scripts/verify_publish.py "${subs[0]}" $2 $3
