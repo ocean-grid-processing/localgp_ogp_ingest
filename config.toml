@@ -5,7 +5,7 @@
 # The time axis is autodetected from the mapping files (whole calendar years; gaps are fatal).
 # The run identifier comes from --tag / OHC_TAG.
 
-var_name   = "potentialTemperature"
+var_name   = "mld"
 model_name = "SpaceTimeTrend"
 
 latitude_range_to_keep = [-64.5, 64.5]
@@ -25,10 +25,10 @@ basinmask_path = "/scratch/alpine/wimi7695/ohc_prod/params/basinmask_04.msk"
 # mapping values as they are (e.g. a mixed layer depth: name = "mld", kind = "intensive",
 # units = "m", publish_unit_factor = 1.0, publish_units = "m").
 [quantity]
-name          = "ohc"
-kind          = "extensive"        # extensive (per-area density) | intensive (per-cell value)
-units         = "J/m2"             # units of the stored, scaled field
-long_name     = "ocean heat content"
-scale_terms   = { cp0 = 3989.244, rho0 = 1030.0 }   # J/(kg K) × kg/m3: K·m -> J/m2
-publish_unit_factor = 1e12         # one published unit = this many stored units (1 TJ/m2 = 1e12 J/m2)
-publish_units = "TJ/m^2"
+name          = "mld"
+kind          = "intensive"        # extensive (per-area density) | intensive (per-cell value)
+units         = "dbar"             # units of the stored, scaled field
+long_name     = "mixed layer depth"
+scale_terms   = { }  
+publish_unit_factor = 1         # one published unit = this many stored units (1 TJ/m2 = 1e12 J/m2)
+publish_units = "dbar"
