@@ -14,7 +14,7 @@
 module purge
 
 cd $SLURM_SUBMIT_DIR
-./dist/ohc_ingest config.toml \
+./dist/ohc_ingest $8 \
   --dir_mean $1 --dir_ensemble $2 --dir_out $3 --layer $4 --tag $5 --provenance-link $6 --code-version $7
 
 

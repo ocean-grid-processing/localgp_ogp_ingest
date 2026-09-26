@@ -2,7 +2,7 @@
 """Full round-trip check: does every grid point of the zarr match the upstream .mat?
 
 Compares the entire store against the LocalGP .mat files — all timesteps of field_mean, and all
-100 members at all timesteps of field_ensemble — for exact equality (after cp0*rho0 and the
+every member at all timesteps of field_ensemble — for exact equality (after the quantity's scale and the
 lon/lat transpose). Uses scipy.io.loadmat as an independent reader (not our Rust parser), and
 opens the store via xarray/zarr (the same path the downstream consumer uses).
 
@@ -22,6 +22,7 @@ Requires: xarray, zarr (>=3 for the v3 store), numpy, scipy. Recommended env:
     conda create -n ohc -c conda-forge python=3.12 "xarray>=2025.1" "zarr>=3" scipy numpy
 """
 import datetime
+import json
 import os
 import sys
 
@@ -76,13 +77,16 @@ class Tally:
 def main(store, dir_mean, dir_ensemble):
     ds = xr.open_zarr(store, consolidated=False, decode_times=False)
 
-    cp0 = ds.attrs["cp0"]
-    rho0 = ds.attrs["rho0"]
+    quantity = json.loads(ds.attrs["quantity"])       # the ingest [quantity] table
     top = ds.attrs["layer_top"]
     bottom = ds.attrs["layer_bottom"]
     var = ds.attrs["var_name"]
     model = ds.attrs["model_name"]
-    scale = cp0 * rho0
+    # the ingest factor: the product of the named scale terms, multiplied in key order exactly as the
+    # Rust does (a BTreeMap iterates sorted by key), so the arithmetic matches; empty terms -> 1
+    scale = 1.0
+    for k in sorted(quantity["scale_terms"]):
+        scale *= float(quantity["scale_terms"][k])
     has_ens = "field_ensemble" in ds        # mean-only stores (ingested --no-ensemble) omit it
 
     units = ds["time"].attrs["units"]            # "days since YYYY-MM-15"
