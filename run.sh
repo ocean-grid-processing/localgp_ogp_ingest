@@ -12,7 +12,7 @@ do
   codeversion=https://github.com/ocean-grid-processing/localgp_ohc_ingest/releases/tag/1.1.0
   # end config ----
   name=$(sed -n 's/^name *= *"\([^"]*\)".*/\1/p' $config); name=${name:-ohc}
-  declare ingest=$(sbatch --parsable ohc_ingest.slurm $meandir $ensembledir $outputdir $layer $tag $provenance $codeversion $config)
+  declare ingest=$(sbatch --parsable localgp_ogp_ingest.slurm $meandir $ensembledir $outputdir $layer $tag $provenance $codeversion $config)
   sbatch --dependency afterok:$ingest verify_store.slurm $outputdir $meandir $ensembledir $tag $layer
   declare publish=$(sbatch --parsable --dependency afterok:$ingest publish.slurm $outputdir $tag $layer $provenance $codeversion $preset "$experiment")
   sbatch --dependency afterok:$publish verify_publish.slurm "$outputdir/${name^^}_${tag}_*_lev${layer}[._]*" $meandir $ensembledir

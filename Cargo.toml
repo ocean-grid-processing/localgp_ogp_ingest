@@ -2,7 +2,13 @@
 name = "ohc_ingest"
 version = "0.1.0"
 edition = "2021"
-description = "Ingest LocalGP .mat output into clean OHC zarr grids + bit-band masks"
+description = "Ingest LocalGP .mat output into clean zarr grids + bit-band masks"
+
+# The library crate keeps its original name (module paths in src/ are unchanged); the executable is
+# named after the repository. Same code, different output filename.
+[[bin]]
+name = "localgp_ogp_ingest"
+path = "src/main.rs"
 
 [dependencies]
 ndarray = "0.16"

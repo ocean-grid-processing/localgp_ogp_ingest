@@ -1,6 +1,6 @@
 # Input data provenance
 
-Two small reference grids are used by ohc_ingest. Both are third-party
+Two small reference grids are used by localgp_ogp_ingest. Both are third-party
 upstream datasets; this records where they came from.
 
 ## etopo60.cdf — 1° global relief (bathymetry)

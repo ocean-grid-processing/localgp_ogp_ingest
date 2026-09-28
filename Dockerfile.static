@@ -11,4 +11,4 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 
 # Export stage: just the binary, so `docker build --output` drops it on the host.
 FROM scratch AS bin
-COPY --from=build /app/target/x86_64-unknown-linux-musl/release/ohc_ingest /ohc_ingest
+COPY --from=build /app/target/x86_64-unknown-linux-musl/release/localgp_ogp_ingest /localgp_ogp_ingest

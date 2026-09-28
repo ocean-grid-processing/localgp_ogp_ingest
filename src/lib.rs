@@ -1,4 +1,4 @@
-//! ohc_ingest — turn LocalGP `.mat` output into clean OHC zarr grids + bit-band masks.
+//! localgp_ogp_ingest — turn LocalGP `.mat` output into clean OHC zarr grids + bit-band masks.
 //!
 //! Scope: read `.mat` (FullField mean + LocalCondSim ensemble), convert integrated
 //! temperature to OHC (`* cp0 * rho0`), preserve NaNs, derive ancillary grids and the

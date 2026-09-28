@@ -1,6 +1,6 @@
-# Static constants + paths for ohc_ingest (one per product/environment).
+# Static constants + paths for localgp_ogp_ingest (one per product/environment).
 # The per-run LAYER is on the command line and is required:
-#   ohc_ingest config.toml --tag OP20260110 --layer 15_20
+#   localgp_ogp_ingest config.toml --tag OP20260110 --layer 15_20
 # (one run processes exactly one layer; loop layers via your job scheduler.)
 # The time axis is autodetected from the mapping files (whole calendar years; gaps are fatal).
 # The run identifier comes from --tag / OHC_TAG.

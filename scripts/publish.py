@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Project an ohc_ingest zarr store to an ME4OH-shaped NetCDF submission.
+"""Project an localgp_ogp_ingest zarr store to an ME4OH-shaped NetCDF submission.
 
 The zarr store is our source of truth (the raw field + a bit-band mask, nothing masked out). A
 compliant submission can only say "don't use this point" via NaN, so this step collapses the
@@ -123,7 +123,7 @@ def mask_value(names):
 def load_quantity(attrs):
     """The store's `quantity` attr (the ingest [quantity] table, as compact JSON) -> dict."""
     if "quantity" not in attrs:
-        raise SystemExit("store has no `quantity` attr (ingest it with the current ohc_ingest)")
+        raise SystemExit("store has no `quantity` attr (ingest it with the current localgp_ogp_ingest)")
     return json.loads(attrs["quantity"])
 
 

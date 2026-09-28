@@ -1,7 +1,7 @@
-//! ohc_ingest driver — processes exactly one layer per run.
+//! localgp_ogp_ingest driver — processes exactly one layer per run.
 //!
 //! Usage:
-//!   ohc_ingest [config.toml] --tag NAME --provenance-link URL --code-version URL --layer T-B [--no-ensemble]
+//!   localgp_ogp_ingest [config.toml] --tag NAME --provenance-link URL --code-version URL --layer T-B [--no-ensemble]
 //!
 //! `--tag`, `--provenance-link`, `--code-version`, `--layer` are REQUIRED (one run = one layer). Each
 //! may also be given via env (`OHC_TAG`, `OHC_PROVENANCE_LINK`, `OHC_CODE_VERSION`, `OHC_LAYER`); CLI
@@ -13,7 +13,7 @@
 //! written to the store's `provenance_tag` attr
 //! (whitespace-stripped, never lowercased — must match the provenance record char-for-char).
 //! `--provenance-link` points at that record (this run's documentation) → `provenance_link` attr;
-//! `--code-version` links the exact ohc_ingest code (a commit/release URL) → `localgp_ingest_code_version`.
+//! `--code-version` links the exact localgp_ogp_ingest code (a commit/release URL) → `localgp_ingest_code_version`.
 //! The store also carries `localgp_ingest_run_config` (the whole resolved config, cold-serialized) and
 //! `localgp_ingest_run_facts` (the discovered axis, layer, ensemble size, grid) as compact JSON-string
 //! attrs — this step's local provenance, namespaced so downstream steps roll it forward untouched.
@@ -26,8 +26,8 @@
 //! The config may omit those three dirs entirely (they default to `.`) and rely on the flags.
 //!
 //! Examples:
-//!   ohc_ingest --layer 15_20
-//!   ohc_ingest config.toml --layer 300_700
+//!   localgp_ogp_ingest --layer 15_20
+//!   localgp_ogp_ingest config.toml --layer 300_700
 //!
 //! To process many layers, run one invocation per layer (e.g. a scheduler job array).
 
@@ -155,7 +155,7 @@ fn main() -> Result<()> {
         Some(v) => v.clone(),
         None => match env::var("OHC_CODE_VERSION") {
             Ok(v) => v,
-            Err(_) => bail!("--code-version is required (link to the ohc_ingest commit/release)"),
+            Err(_) => bail!("--code-version is required (link to the localgp_ogp_ingest commit/release)"),
         },
     };
     let layer = resolve_layer(&cli)?;

@@ -1,6 +1,6 @@
 # Mask bit band (`mask_flags`)
 
-`ohc_ingest` never deletes data. Instead of NaN-ing cells out, it records — per grid cell — one
+`localgp_ogp_ingest` never deletes data. Instead of NaN-ing cells out, it records — per grid cell — one
 bit for each independent *reason* the cell might be excluded. Downstream code chooses which
 reasons to honor with a bitwise test, and `publish.py` collapses a chosen set to NaN when it
 writes a submission. This document defines the bits.

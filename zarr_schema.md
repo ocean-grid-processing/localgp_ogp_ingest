@@ -1,6 +1,6 @@
 # zarr store layout
 
-`ohc_ingest` writes one zarr store per mapped layer per run. The store is the pipeline's internal
+`localgp_ogp_ingest` writes one zarr store per mapped layer per run. The store is the pipeline's internal
 representation — raw OHC plus the `mask_flags` bit band, with nothing masked out. (`publish.py`
 projects it to the ME4OH submission; see the crate README.) Companion: [`mask_spec.md`](./mask_spec.md).
 
@@ -102,7 +102,7 @@ domain            = "lon 20.5..379.5E, lat -89.5..89.5N, 1deg"
 quantity          = "<json>"       # the [quantity] table: name, kind, units, long_name, scale_terms, publish_unit_factor, publish_units
 
 # stage-namespaced local provenance (STAGE = "localgp_ingest"):
-localgp_ingest_code_version = "<url>"   # exact ohc_ingest code (commit/release); --code-version
+localgp_ingest_code_version = "<url>"   # exact localgp_ogp_ingest code (commit/release); --code-version
 localgp_ingest_run_config   = "<json>"  # whole resolved RunConfig, cold-serialized (pretty JSON string)
 localgp_ingest_run_facts    = "<json>"  # derived per-run facts (pretty JSON string; see below)
 ```

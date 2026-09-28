@@ -114,7 +114,7 @@ pub struct RunConfig {
     /// (the `--tag` metadata document). Required at runtime; this default is a placeholder.
     #[serde(default)]
     pub provenance_link: String,
-    /// link to the exact ohc_ingest code (a commit or release URL), set per-run via `--code-version`.
+    /// link to the exact localgp_ogp_ingest code (a commit or release URL), set per-run via `--code-version`.
     /// Required at runtime; this default is a placeholder.
     #[serde(default)]
     pub code_version: String,
@@ -362,7 +362,7 @@ mod tests {
     fn run_config_cold_serializes_all_fields() {
         // The provenance block is the whole resolved struct — every field lands, defaults included.
         let mut cfg = RunConfig::defaults();
-        cfg.code_version = "https://github.com/argovis/ohc_ingest/commit/abc123".into();
+        cfg.code_version = "https://github.com/argovis/localgp_ogp_ingest/commit/abc123".into();
         let json = serde_json::to_string(&cfg).unwrap();
         for key in [
             "run_tag", "provenance_link", "code_version", "var_name", "model_name",
