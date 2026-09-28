@@ -86,12 +86,10 @@ to NaN in `publish.py`). The bits:
 | 6 | 64 | `bed_above_clip` | seafloor shallower than a fixed clip depth, applied uniformly to every layer (set only when `bathy_clip_m` is configured) |
 | 7 | 128 | `ensemble_incomplete` | some CondSim member is NaN-in-time here even if the mean is finite (unset for a `--no-ensemble` store) |
 
-Bits 0/1/4/5/7 are physical/validity reasons; bits 2/3/6 are policy reasons. `publish.py`'s
-presets pick different subsets — notably `wmo` honors `bed_above_shallow` (fully-dry cells) but
-*not* `bed_above_deep` (partial slope cells are kept), while `wmo_wet` honors `bed_above_deep`
-(whole cell wet) and drops those partials, and `wmo_layerless` honors neither (for a quantity with
-no layer). Full definitions, the exact preset subsets,
-the selector conventions, and the monotonic-bathymetry sentinel are in [`mask_spec.md`](mask_spec.md).
+Bits 0/1/4/5/7 are physical/validity reasons; bits 2/3/6 are policy reasons. `publish.py` collapses
+a chosen subset to NaN — a `--preset` or an explicit `--mask-bits` list. Full bit definitions, the
+presets table, the selector conventions, the layerless-token rule, and the monotonic-bathymetry
+sentinel are in [`mask_spec.md`](mask_spec.md).
 
 ## Usage
 
@@ -210,7 +208,7 @@ the protocol's "associated uncertainties, where available"), computed from `fiel
 | `--tag` | *inherited from the store's `provenance_tag`* | provenance tag: the **run token** in the filename (`<NAME>_<tag>_…[_exp<X>].nc`) **and** the `provenance_tag` header attr. Defaults to what the ingest `--tag` stamped on the store; pass only to override. |
 | `--provenance-link` | *inherited from the store's `provenance_link`* | URL/path to the provenance record; written to the `provenance_link` header attr. Pass only to override. |
 | `--code-version` | *(required)* | URL to the exact publish code (commit/release); stamped as `localgp_publish_code_version`. This step's own code, distinct from the store's ingest code version. |
-| `--preset` | `me4oh` | named mask policy — `me4oh`, `wmo`, `wmo_wet`, or `wmo_layerless` (see below); an alias for a `--mask-bits` list |
+| `--preset` | `me4oh` | named mask policy — `me4oh`, `wmo`, `wmo_wet`, or `wmo_layerless`; an alias for a `--mask-bits` list. Which bits each honors: the presets table in [`mask_spec.md`](mask_spec.md#presets) |
 | `--mask-bits` | *(none)* | explicit comma list of mask bit names to honor (from [`mask_spec.md`](mask_spec.md)); give this or `--preset`, not both. The resolved list lands in the `mask_applied` attr either way |
 | `--levels LOW,HIGH` | store's layer bounds | override the filename's layer bounds (meters) |
 | `--no-uncertainty` | off | skip `DATA_SD` (and the full-ensemble read) |
@@ -223,18 +221,6 @@ the protocol's "associated uncertainties, where available"), computed from `fiel
 size, grid), and `localgp_publish_code_version`. Each step namespaces its block by identity, so the
 chain accretes without collision and rolls forward at every stage; the global `provenance_tag` /
 `provenance_link` stay unprefixed and shared.
-
-**Mask presets** (`--preset`): `me4oh` (default) honors only the physical/validity bits
-(`never_estimated`, `incomplete_timeseries`, `bed_above_shallow`, `bed_above_deep`) — the honest,
-maximal valid field, letting the assessment define the common domain. `wmo` is our
-latitude/basin-cropped product: it adds `outside_latitude`, `removed_basin`, `bed_above_clip`, and
-`ensemble_incomplete`, and — deliberately — honors `bed_above_shallow` (fully-dry cells) but **not**
-`bed_above_deep` (partial continental-slope cells are kept). `wmo_wet` is the same crops but honors
-`bed_above_deep` in place of `bed_above_shallow`, requiring a whole cell wet (partials drop too).
-`wmo_layerless` is the `wmo` crops with neither bed bit, for a quantity that has no layer (a mixed
-layer depth): its filename layer token is a name, so the per-layer bathymetry bits mean nothing there.
-Exact bit subsets, and the layerless-token rule, in
-[`mask_spec.md`](mask_spec.md).
 
 **Mean-only stores:** a store produced by the rust with `--no-ensemble` has no `field_ensemble`; publish detects this, writes `DATA` without `DATA_SD` (with a note), and `--ensemble` on such a store is an error.
 
