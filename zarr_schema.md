@@ -1,6 +1,6 @@
 # zarr store layout
 
-`ohc_ingest` writes one zarr store per mapped layer per run. The store is the pipeline's internal
+`localgp_ogp_ingest` writes one zarr store per mapped layer per run. The store is the pipeline's internal
 representation — raw OHC plus the `mask_flags` bit band, with nothing masked out. (`publish.py`
 projects it to the ME4OH submission; see the crate README.) Companion: [`mask_spec.md`](./mask_spec.md).
 
@@ -9,7 +9,7 @@ projects it to the ME4OH submission; see the crate README.) Companion: [`mask_sp
 Each store holds exactly one layer of one run; the directory is the unit:
 
 ```
-ohc_<tag>_plev<top>_<bottom>.zarr/     e.g. ohc_OP20260110_plev15_300.zarr/
+<quantity>_<tag>_<Y0>_<Y1>_plev<top>_<bottom>.zarr/     e.g. ohc_OP20260110_2004_2025_plev15_300.zarr/
 ```
 
 Layers are independent (mapped separately, overlapping in depth), so they are never combined
@@ -22,10 +22,10 @@ A zarr store is a directory tree: each array is a directory with a small JSON me
 meaningful:
 
 ```
-ohc_<tag>_plev15_300.zarr/
+ohc_<tag>_2004_2025_plev15_300.zarr/
 ├── zarr.json                    group metadata + attributes
-├── ohc_mean/      c/0/0/0       1 file   — posterior-mean field            (time, lat, lon)
-├── ohc_ensemble/  c/<m>/0/0/0   100 files — one per conditional simulation  (member, time, lat, lon)
+├── field_mean/      c/0/0/0       1 file   — posterior-mean field            (time, lat, lon)
+├── field_ensemble/  c/<m>/0/0/0   100 files — one per conditional simulation  (member, time, lat, lon)
 ├── mask_flags/    c/0/0         1 file   — the bit band (lat, lon); see mask_spec.md
 ├── etopo/         c/0/0         1 file   — bathymetry (lat, lon)
 ├── basin_id/      c/0/0         1 file   — basin ids (lat, lon)
@@ -34,25 +34,28 @@ ohc_<tag>_plev15_300.zarr/
 ```
 
 The 101 big files map 1:1 onto LocalGP's output for the layer: one `FullField` mean
-(`ohc_mean`) + 100 `LocalCondSim` members (`ohc_ensemble`). An ensemble chunk file reads as
+(`field_mean`) + 100 `LocalCondSim` members (`field_ensemble`). An ensemble chunk file reads as
 "member M's complete record for this layer."
 
 ## Arrays
 
 | array | dims | dtype | units | fill | chunk |
 |---|---|---|---|---|---|
-| `ohc_mean` | `(time, lat, lon)` | f64 | J/m² | NaN | whole array (1 chunk) |
-| `ohc_ensemble` | `(member, time, lat, lon)` | f64 | J/m² | NaN | `(1, time, lat, lon)` — 1 per member |
+| `field_mean` | `(time, lat, lon)` | f64 | `quantity.units` (OHC: J/m²) | NaN | whole array (1 chunk) |
+| `field_ensemble` | `(member, time, lat, lon)` | f64 | `quantity.units` | NaN | `(1, time, lat, lon)` — 1 per member |
+
+The data arrays are named generically; the group's `quantity` attr (and each array's `units` /
+`long_name`, taken from the `[quantity]` table) say what the field is.
 | `mask_flags` | `(lat, lon)` | u8 | — | — | 1 chunk |
 | `etopo` | `(lat, lon)` | f32 | m | NaN | 1 chunk |
 | `basin_id` | `(lat, lon)` | i16 | — | — | 1 chunk |
 | `cell_area` | `(lat, lon)` | f64 | m² | — | 1 chunk |
 
-`ohc_mean` is **f64**: downstream products (e.g. the GCOS deliverable) take a large-mean anomaly
-(absolute OHC − baseline), a cancellation that needs double precision. `ohc_ensemble` is **f64**
+`field_mean` is **f64**: downstream products (e.g. the GCOS deliverable) take a large-mean anomaly
+(absolute OHC − baseline), a cancellation that needs double precision. `field_ensemble` is **f64**
 too — its yearly-spread and trend uncertainties feed the same cancellation-prone anomalies, so
 single precision would leave them a few percent off; the cost is a doubled (~13.7 GB) 100-member
-footprint. `ohc_ensemble` is **absent** in a mean-only store (ingested `--no-ensemble`):
+footprint. `field_ensemble` is **absent** in a mean-only store (ingested `--no-ensemble`):
 the CondSim files aren't read, and `publish.py` then emits `DATA` without `DATA_SD`.
 
 ### Coordinates
@@ -62,7 +65,7 @@ the CondSim files aren't read, and `publish.py` then emits `DATA` without `DATA_
 | `lon` | `(lon: 360)` | f64 | degrees_east, `20.5 … 379.5` |
 | `lat` | `(lat: 180)` | f64 | degrees_north, `−89.5 … 89.5` |
 | `time` | `(time: N)` | f64 | `days since <first-month>-15`, monthly (day 15) |
-| `member` | `(member: 100)` | i16 | `1 … 100` |
+| `member` | `(member: M)` | i16 | `1 … M`, M = the ensemble size the mapping files held (100 for LocalCondSim to date); absent in a mean-only store |
 
 ## Chunking
 
@@ -75,10 +78,10 @@ Codecs: `bytes` (little-endian) + `gzip` — pure Rust (no Blosc/HDF5), read nat
 
 ## Data conventions
 
-- OHC stored in **J/m²** (after `cp0·rho0`); `cp0`/`rho0` are group attributes, so the scaling
+- OHC stored in **J/m²** (after `cp0·rho0`); the `quantity` attr carries the scale terms by name, so the scaling
   is invertible.
 - **Absolute, not anomaly** — anomaly referencing is a downstream choice.
-- The **full 100-member ensemble** is kept; std / percentiles derive on read.
+- The **full ensemble** is kept (every member the mapping files held); std / percentiles derive on read.
 - **Nothing is masked in the data** — masking lives in `mask_flags` (see `mask_spec.md`);
   per-timestep validity is `isfinite(data)`.
 
@@ -86,7 +89,7 @@ Codecs: `bytes` (little-endian) + `gzip` — pure Rust (no Blosc/HDF5), read nat
 
 ```
 Conventions       = "CF-1.10"
-title             = "LocalGP ocean heat content — <tag>, <top>-<bottom> dbar"
+title             = "LocalGP <quantity.long_name> — <tag>, <top>-<bottom> dbar"
 source            = "LocalGP <model>; var=<var>; run=<tag>"
 mapped_fields_tag = "<tag>"
 provenance_tag    = "<tag>"        # global run token (= store dir-name token); --tag, char-for-char
@@ -95,12 +98,11 @@ var_name          = "<var>"        # e.g. potentialTemperature
 model_name        = "<model>"      # e.g. SpaceTimeTrend
 layer_top         = <top>          # dbar, shallow edge
 layer_bottom      = <bottom>       # dbar, deep edge
-cp0               = 3989.244       # J/(kg K)
-rho0              = 1030           # kg/m3
 domain            = "lon 20.5..379.5E, lat -89.5..89.5N, 1deg"
+quantity          = "<json>"       # the [quantity] table: name, kind, units, long_name, scale_terms, publish_unit_factor, publish_units
 
 # stage-namespaced local provenance (STAGE = "localgp_ingest"):
-localgp_ingest_code_version = "<url>"   # exact ohc_ingest code (commit/release); --code-version
+localgp_ingest_code_version = "<url>"   # exact localgp_ogp_ingest code (commit/release); --code-version
 localgp_ingest_run_config   = "<json>"  # whole resolved RunConfig, cold-serialized (pretty JSON string)
 localgp_ingest_run_facts    = "<json>"  # derived per-run facts (pretty JSON string; see below)
 ```

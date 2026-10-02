@@ -7,8 +7,87 @@
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+/// Whether the mapped quantity is a per-area density that sums over area and stacks over layers
+/// (`extensive`, e.g. OHC in J/m²) or a per-cell value that does neither (`intensive`, e.g. a
+/// mixed layer depth in m). Recorded for downstream stages; ingest itself treats both alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Extensive,
+    Intensive,
+}
+
+/// What the mapped grid is, and how it is scaled into the store and the submission. One
+/// `[quantity]` table per config; every field has a default that reproduces the OHC product.
+///
+/// `scale_terms` is a named table of factors whose product is applied to every raw mapping value
+/// at ingest (`{cp0 = 3989.244, rho0 = 1030.0}` turns integrated temperature in K·m into J/m²).
+/// The names are kept, not just the product, so the physics stays legible in the provenance and a
+/// downstream step can recover a term by name. An empty table is the identity: the store holds
+/// the mapping values as they are.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Quantity {
+    /// short slug naming the quantity (`ohc`, `mld`, …)
+    #[serde(default = "default_quantity_name")]
+    pub name: String,
+    #[serde(default = "default_kind")]
+    pub kind: Kind,
+    /// units of the stored (scaled) field
+    #[serde(default = "default_units")]
+    pub units: String,
+    #[serde(default = "default_long_name")]
+    pub long_name: String,
+    /// named factors; their product scales the raw mapping values at ingest (empty = 1)
+    #[serde(default = "default_scale_terms")]
+    pub scale_terms: BTreeMap<String, f64>,
+    /// one published unit is this many stored units; publish divides by it (OHC: 1 TJ/m² =
+    /// 1e12 J/m²). A divisor rather than a multiplier because the powers of ten are exact in f64
+    /// this way round, so the published values are correctly rounded.
+    #[serde(default = "default_publish_unit_factor")]
+    pub publish_unit_factor: f64,
+    /// units of the published field
+    #[serde(default = "default_publish_units")]
+    pub publish_units: String,
+}
+
+fn default_quantity_name() -> String { "ohc".into() }
+fn default_kind() -> Kind { Kind::Extensive }
+fn default_units() -> String { "J/m2".into() }
+fn default_long_name() -> String { "ocean heat content".into() }
+fn default_scale_terms() -> BTreeMap<String, f64> {
+    BTreeMap::from([("cp0".to_string(), crate::consts::CP0), ("rho0".to_string(), crate::consts::RHO0)])
+}
+fn default_publish_unit_factor() -> f64 { 1e12 }
+fn default_publish_units() -> String { "TJ/m^2".into() }
+
+impl Quantity {
+    /// The OHC product: integrated potential temperature × cp0·rho0, J/m² in the store, TJ/m²
+    /// when published. This is the default when a config has no `[quantity]` table.
+    pub fn ohc() -> Self {
+        Quantity {
+            name: default_quantity_name(),
+            kind: default_kind(),
+            units: default_units(),
+            long_name: default_long_name(),
+            scale_terms: default_scale_terms(),
+            publish_unit_factor: default_publish_unit_factor(),
+            publish_units: default_publish_units(),
+        }
+    }
+
+    /// The ingest factor: the product of `scale_terms` (1 when empty).
+    pub fn scale(&self) -> f64 {
+        self.scale_terms.values().product()
+    }
+
+    /// One named term, if the table has it (e.g. `cp0`).
+    pub fn term(&self, name: &str) -> Option<f64> {
+        self.scale_terms.get(name).copied()
+    }
+}
 
 /// One mapped pressure layer, bounds in dbar (shallow `top`, deep `bottom`).
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -35,7 +114,7 @@ pub struct RunConfig {
     /// (the `--tag` metadata document). Required at runtime; this default is a placeholder.
     #[serde(default)]
     pub provenance_link: String,
-    /// link to the exact ohc_ingest code (a commit or release URL), set per-run via `--code-version`.
+    /// link to the exact localgp_ogp_ingest code (a commit or release URL), set per-run via `--code-version`.
     /// Required at runtime; this default is a placeholder.
     #[serde(default)]
     pub code_version: String,
@@ -51,12 +130,6 @@ pub struct RunConfig {
     /// (`bed_above_clip`). `None` = no clip. WMO/GCOS product uses 300.
     #[serde(default)]
     pub bathy_clip_m: Option<f64>,
-    /// value in the mapping `.mat` that means "missing" → converted to NaN at ingest (so the
-    /// validity bits drop the cell), mirroring the original's `val2use_asNaN`. `None` = only NaN
-    /// is missing. WMO/GCOS uses 0.0 (absolute OHC is never 0 at a wet cell, so 0 is a safe
-    /// sentinel). Compared against the raw mapping value before the cp0·rho0 scaling.
-    #[serde(default)]
-    pub missing_sentinel: Option<f64>,
     /// dir holding the FullField mean `.mat` files (may be omitted here and set via `--dir_mean`)
     #[serde(default = "default_dir")]
     pub dir_mean: PathBuf,
@@ -70,14 +143,11 @@ pub struct RunConfig {
     pub etopo_path: PathBuf,
     /// path to basinmask_04.msk
     pub basinmask_path: PathBuf,
-    #[serde(default = "default_cp0")]
-    pub cp0: f64,
-    #[serde(default = "default_rho0")]
-    pub rho0: f64,
+    /// the mapped quantity and its scaling (`[quantity]` table; defaults to the OHC product)
+    #[serde(default = "Quantity::ohc")]
+    pub quantity: Quantity,
 }
 
-fn default_cp0() -> f64 { crate::consts::CP0 }
-fn default_rho0() -> f64 { crate::consts::RHO0 }
 fn default_tag() -> String { "UNSET".into() }
 fn default_dir() -> PathBuf { PathBuf::from(".") }
 
@@ -94,14 +164,12 @@ impl RunConfig {
             latitude_range_to_keep: [-64.5, 64.5],
             basins_to_remove: vec![0, 5, 6, 7, 8, 9, 53],
             bathy_clip_m: None,
-            missing_sentinel: None,
             dir_mean: PathBuf::from("."),
             dir_ensemble: PathBuf::from("."),
             dir_out: PathBuf::from("."),
             etopo_path: PathBuf::from("etopo60.cdf"),
             basinmask_path: PathBuf::from("basinmask_04.msk"),
-            cp0: crate::consts::CP0,
-            rho0: crate::consts::RHO0,
+            quantity: Quantity::ohc(),
         }
     }
 
@@ -125,11 +193,12 @@ impl RunConfig {
     }
 
     /// zarr store directory for a layer. `years` is the discovered `[Ymin, Ymax]` data span, so the
-    /// store name carries the years it covers: `ohc_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr`.
+    /// store name carries the years it covers: `<quantity>_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr`
+    /// (the leading token is the quantity's `name`, e.g. `ohc`).
     pub fn store_path(&self, layer: &LayerSpec, years: [i32; 2]) -> PathBuf {
         self.dir_out.join(format!(
-            "ohc_{}_{}_{}_plev{}.zarr",
-            self.run_tag, years[0], years[1], layer.tag()
+            "{}_{}_{}_{}_plev{}.zarr",
+            self.quantity.name, self.run_tag, years[0], years[1], layer.tag()
         ))
     }
 
@@ -287,21 +356,63 @@ pub fn parse_layer(s: &str) -> Result<LayerSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::consts::{CP0, RHO0};
 
     #[test]
     fn run_config_cold_serializes_all_fields() {
         // The provenance block is the whole resolved struct — every field lands, defaults included.
         let mut cfg = RunConfig::defaults();
-        cfg.code_version = "https://github.com/argovis/ohc_ingest/commit/abc123".into();
+        cfg.code_version = "https://github.com/argovis/localgp_ogp_ingest/commit/abc123".into();
         let json = serde_json::to_string(&cfg).unwrap();
         for key in [
             "run_tag", "provenance_link", "code_version", "var_name", "model_name",
-            "latitude_range_to_keep", "basins_to_remove", "bathy_clip_m", "missing_sentinel",
-            "dir_mean", "dir_ensemble", "dir_out", "etopo_path", "basinmask_path", "cp0", "rho0",
+            "latitude_range_to_keep", "basins_to_remove", "bathy_clip_m",
+            "dir_mean", "dir_ensemble", "dir_out", "etopo_path", "basinmask_path", "quantity",
+            "scale_terms", "cp0", "rho0", "publish_unit_factor",
         ] {
             assert!(json.contains(key), "run_config missing {key}: {json}");
         }
         assert!(json.contains("abc123"));
+    }
+
+    #[test]
+    fn quantity_defaults_to_ohc_and_scales_by_the_product_of_terms() {
+        let q = Quantity::ohc();
+        assert_eq!(q.name, "ohc");
+        assert_eq!(q.kind, Kind::Extensive);
+        assert_eq!(q.scale(), crate::consts::CP0 * crate::consts::RHO0);
+        assert_eq!(q.term("cp0"), Some(crate::consts::CP0));
+        assert_eq!(q.term("nope"), None);
+        // a config with no [quantity] table is the OHC product
+        let cfg: RunConfig = toml::from_str(
+            "var_name='potentialTemperature'\nmodel_name='SpaceTimeTrend'\n\
+             latitude_range_to_keep=[-64.5,64.5]\nbasins_to_remove=[0]\n\
+             etopo_path='e'\nbasinmask_path='b'\n",
+        ).unwrap();
+        assert_eq!(cfg.quantity.scale(), CP0 * RHO0);
+    }
+
+    #[test]
+    fn quantity_table_parses_and_empty_terms_are_identity() {
+        let cfg: RunConfig = toml::from_str(
+            "var_name='mld'\nmodel_name='SpaceTimeTrend'\n\
+             latitude_range_to_keep=[-64.5,64.5]\nbasins_to_remove=[0]\n\
+             etopo_path='e'\nbasinmask_path='b'\n\
+             [quantity]\nname='mld'\nkind='intensive'\nunits='m'\nlong_name='mixed layer depth'\n\
+             scale_terms={}\npublish_unit_factor=1.0\npublish_units='m'\n",
+        ).unwrap();
+        let q = &cfg.quantity;
+        assert_eq!(q.kind, Kind::Intensive);
+        assert_eq!(q.scale(), 1.0);
+        assert!(q.scale_terms.is_empty());
+        assert_eq!(q.publish_unit_factor, 1.0);
+        // a partial table keeps the defaults for what it omits
+        let cfg: RunConfig = toml::from_str(
+            "var_name='x'\nmodel_name='y'\nlatitude_range_to_keep=[-64.5,64.5]\nbasins_to_remove=[0]\n\
+             etopo_path='e'\nbasinmask_path='b'\n[quantity]\nscale_terms={a=2.0,b=3.0}\n",
+        ).unwrap();
+        assert_eq!(cfg.quantity.scale(), 6.0);
+        assert_eq!(cfg.quantity.name, "ohc");
     }
 
     #[test]
@@ -388,6 +499,16 @@ mod tests {
         assert!(cfg.discover_years(&layer, false).is_err());
 
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn store_path_leads_with_the_quantity_name() {
+        let mut c = RunConfig::defaults();
+        c.run_tag = "OP1".into();
+        let l = LayerSpec { top: 15, bottom: 20 };
+        assert!(c.store_path(&l, [2004, 2005]).ends_with("ohc_OP1_2004_2005_plev15_20.zarr"));
+        c.quantity.name = "mld".into();
+        assert!(c.store_path(&l, [2004, 2005]).ends_with("mld_OP1_2004_2005_plev15_20.zarr"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
-# Static constants + paths for ohc_ingest (one per product/environment).
+# Static constants + paths for localgp_ogp_ingest (one per product/environment).
 # The per-run LAYER is on the command line and is required:
-#   ohc_ingest config.toml --tag OP20260110 --layer 15_20
+#   localgp_ogp_ingest config.toml --tag OP20260110 --layer 15_20
 # (one run processes exactly one layer; loop layers via your job scheduler.)
 # The time axis is autodetected from the mapping files (whole calendar years; gaps are fatal).
 # The run identifier comes from --tag / OHC_TAG.
@@ -16,11 +16,6 @@ basins_to_remove       = [0, 5, 6, 7, 8, 9, 53]
 # WMO product uses 300 — matches the original `max_pressure_to_keep = 300`. Write it as a float.
 # bathy_clip_m = 300.0
 
-# Missing-value sentinel: a raw mapping value that means "missing" → converted to NaN at ingest,
-# mirroring the original's val2use_asNaN. GCOS/WMO uses 0.0 (absolute OHC is never 0 at a wet
-# cell, so any zero-filled cell is dropped). Omit to treat only NaN as missing.
-# missing_sentinel = 0.0
-
 # LocalGP .mat output dirs — mean and ensemble live in separate directories.
 # Use absolute paths on the cluster (jobs may start in an unpredictable cwd).
 # These three are OPTIONAL here: omit them and pass --dir_mean / --dir_ensemble / --dir_out on the
@@ -31,4 +26,16 @@ dir_out        = "/path/to/output/ohc_zarr"
 etopo_path     = "/path/to/data/etopo60.cdf"
 basinmask_path = "/path/to/data/basinmask_04.msk"
 
-# Optional (defaults shown): cp0 = 3989.244, rho0 = 1030.0
+# The mapped quantity and its scaling. Every raw mapping value is multiplied by the product of
+# `scale_terms` at ingest; the names are kept in the provenance so the physics stays legible.
+# Omit the whole table for the OHC defaults shown here; an empty `scale_terms = {}` stores the
+# mapping values as they are (e.g. a mixed layer depth: name = "mld", kind = "intensive",
+# units = "m", publish_unit_factor = 1.0, publish_units = "m").
+[quantity]
+name          = "ohc"
+kind          = "extensive"        # extensive (per-area density) | intensive (per-cell value)
+units         = "J/m2"             # units of the stored, scaled field
+long_name     = "ocean heat content"
+scale_terms   = { cp0 = 3989.244, rho0 = 1030.0 }   # J/(kg K) × kg/m3: K·m -> J/m2
+publish_unit_factor = 1e12         # one published unit = this many stored units (1 TJ/m2 = 1e12 J/m2)
+publish_units = "TJ/m^2"

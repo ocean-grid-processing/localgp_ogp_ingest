@@ -1,6 +1,6 @@
 # Mask bit band (`mask_flags`)
 
-`ohc_ingest` never deletes data. Instead of NaN-ing cells out, it records — per grid cell — one
+`localgp_ogp_ingest` never deletes data. Instead of NaN-ing cells out, it records — per grid cell — one
 bit for each independent *reason* the cell might be excluded. Downstream code chooses which
 reasons to honor with a bitwise test, and `publish.py` collapses a chosen set to NaN when it
 writes a submission. This document defines the bits.
@@ -58,16 +58,48 @@ keep = (mask_flags & USABLE) == 0
 
 Drop bits from the selector to relax a policy: a global (un-cropped) integral uses
 `USABLE & ~outside_latitude`; tolerating partial-depth cells drops `bed_above_deep`; including
-marginal seas drops `removed_basin`. `publish.py` ships three presets — `me4oh` honors the physical
-bits (0,1,4,5); `wmo` honors validity + `outside_latitude` + `removed_basin` + `bed_above_shallow` + `bed_above_clip` + `ensemble_incomplete`, but **not** `bed_above_deep`; `wmo_wet` is the same crops but with `bed_above_deep` in place of `bed_above_shallow`, requiring a whole cell wet (the partial cells drop too). The `bed_above_shallow`
-vs `bed_above_deep` split in `wmo` is deliberate: drop cells where the layer is *entirely* below the
-seabed (fully dry, `bed_above_shallow`), but keep *partial* cells where the seabed cuts through the
-layer (`bed_above_deep` off) — the continental-slope cells the original retains. Honoring
-`bed_above_shallow` also guarantees a deeper-topped layer's footprint is a subset of a
-shallower-topped one with the same bottom (e.g. `A(1800_1850) ⊆ A(700_1850)`), which the mapping's
-own NaNs don't always enforce. `bed_above_shallow ⇒ bed_above_deep` always (a seabed above the top
-is above the bottom too), so honoring `bed_above_deep` (as `wmo_wet` does) supersedes
-`bed_above_shallow`; likewise it supersedes `bed_above_clip` while every layer bottom is ≥ the clip.
+marginal seas drops `removed_basin`.
+
+## Presets
+
+`publish.py` takes the honored set as an explicit `--mask-bits` list of names, or as a `--preset`
+alias for one of these lists. A cell is dropped (set to NaN) when **any** honored bit is set.
+
+| bit | `me4oh` | `wmo` | `wmo_wet` | `wmo_layerless` |
+|---|:--:|:--:|:--:|:--:|
+| `bed_above_shallow` | ✓ | ✓ | | |
+| `bed_above_deep` | ✓ | | ✓ | |
+| `outside_latitude` | | ✓ | ✓ | ✓ |
+| `removed_basin` | | ✓ | ✓ | ✓ |
+| `never_estimated` | ✓ | ✓ | ✓ | ✓ |
+| `incomplete_timeseries` | ✓ | ✓ | ✓ | ✓ |
+| `bed_above_clip` | | ✓ | ✓ | ✓ |
+| `ensemble_incomplete` | | ✓ | ✓ | ✓ |
+| *for* | the maximal valid field; the assessment defines the common domain | the WMO/GCOS domain: cropped, fully-dry cells out, partial slope cells kept | as `wmo` but a whole cell must be wet | as `wmo` for a quantity with no layer (below) |
+
+On the two bed bits: `bed_above_shallow ⇒ bed_above_deep` always (a seabed above the layer's top is
+above its bottom too), so honoring `bed_above_deep` supersedes `bed_above_shallow`. `wmo` honors
+only the shallow bit deliberately — drop cells where the layer is *entirely* below the seabed, keep
+the *partial* cells where the seabed cuts through it, the continental-slope cells the original
+retains — and this also guarantees a deeper-topped layer's footprint is a subset of a
+shallower-topped one with the same bottom (`A(1800_1850) ⊆ A(700_1850)`), which the mapping's own
+NaNs don't always enforce. `bed_above_clip` is a fixed depth independent of the layer, so it stays
+meaningful for a layerless quantity while the two bed bits do not.
+
+## Quantities with no layer
+
+A mapped quantity that is not a depth layer (a mixed layer depth, say) still arrives from LocalGP
+with a `<top>_<bottom>` token in its filenames, and ingest still requires `--layer`. The token is
+then a **name**: it keys the files, the store, and the submission, and nothing more. Two
+consequences:
+
+- Bits 0 and 1 (`bed_above_shallow`, `bed_above_deep`) are computed against the nominal token and
+  carry no meaning. They are still written (the band's layout doesn't change), and must not be
+  honored: use `wmo_layerless`, or a `--mask-bits` list without them.
+- The token must satisfy `top <= bottom`, so the shallow ⇒ deep sentinel (below) holds.
+
+`bed_above_clip` is unaffected — it is a fixed depth independent of any layer — and remains a
+policy choice for such a quantity.
 
 ## Conventions
 

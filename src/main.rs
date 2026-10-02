@@ -1,7 +1,7 @@
-//! ohc_ingest driver — processes exactly one layer per run.
+//! localgp_ogp_ingest driver — processes exactly one layer per run.
 //!
 //! Usage:
-//!   ohc_ingest [config.toml] --tag NAME --provenance-link URL --code-version URL --layer T-B [--no-ensemble]
+//!   localgp_ogp_ingest [config.toml] --tag NAME --provenance-link URL --code-version URL --layer T-B [--no-ensemble]
 //!
 //! `--tag`, `--provenance-link`, `--code-version`, `--layer` are REQUIRED (one run = one layer). Each
 //! may also be given via env (`OHC_TAG`, `OHC_PROVENANCE_LINK`, `OHC_CODE_VERSION`, `OHC_LAYER`); CLI
@@ -13,12 +13,12 @@
 //! written to the store's `provenance_tag` attr
 //! (whitespace-stripped, never lowercased — must match the provenance record char-for-char).
 //! `--provenance-link` points at that record (this run's documentation) → `provenance_link` attr;
-//! `--code-version` links the exact ohc_ingest code (a commit/release URL) → `localgp_ingest_code_version`.
+//! `--code-version` links the exact localgp_ogp_ingest code (a commit/release URL) → `localgp_ingest_code_version`.
 //! The store also carries `localgp_ingest_run_config` (the whole resolved config, cold-serialized) and
 //! `localgp_ingest_run_facts` (the discovered axis, layer, ensemble size, grid) as compact JSON-string
 //! attrs — this step's local provenance, namespaced so downstream steps roll it forward untouched.
 //! `--no-ensemble` (or `OHC_NO_ENSEMBLE`) ingests the mean only — skips the LocalCondSim files
-//! and omits `ohc_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
+//! and omits `field_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
 //! Static constants + paths come from `config.toml`, or from the defaults + path env vars
 //! (`OHC_DIR_MEAN`, `OHC_DIR_ENSEMBLE`, `OHC_DIR_OUT`, `OHC_ETOPO`, `OHC_BASINMASK`) when no
 //! config is given. `--dir_mean`, `--dir_ensemble`, `--dir_out` override those directories on the
@@ -26,8 +26,8 @@
 //! The config may omit those three dirs entirely (they default to `.`) and rely on the flags.
 //!
 //! Examples:
-//!   ohc_ingest --layer 15_20
-//!   ohc_ingest config.toml --layer 300_700
+//!   localgp_ogp_ingest --layer 15_20
+//!   localgp_ogp_ingest config.toml --layer 300_700
 //!
 //! To process many layers, run one invocation per layer (e.g. a scheduler job array).
 
@@ -155,7 +155,7 @@ fn main() -> Result<()> {
         Some(v) => v.clone(),
         None => match env::var("OHC_CODE_VERSION") {
             Ok(v) => v,
-            Err(_) => bail!("--code-version is required (link to the ohc_ingest commit/release)"),
+            Err(_) => bail!("--code-version is required (link to the localgp_ogp_ingest commit/release)"),
         },
     };
     let layer = resolve_layer(&cli)?;
@@ -200,9 +200,9 @@ fn main() -> Result<()> {
         if cli.no_ensemble { " (mean-only, --no-ensemble)" } else { "" });
     let data = ingest::ingest_layer(&cfg, &slice, &grid, cli.no_ensemble)
         .with_context(|| format!("ingesting layer {}", slice.layer.tag()))?;
-    let (never, incomplete) = masks::compute_validity(&data.ohc_mean);
+    let (never, incomplete) = masks::compute_validity(&data.field_mean);
     // Union the member NaN footprints (matches the original's mean∪members mask); None if mean-only.
-    let ens_incomplete = data.ohc_ensemble.as_ref().map(masks::compute_ensemble_incomplete);
+    let ens_incomplete = data.field_ensemble.as_ref().map(masks::compute_ensemble_incomplete);
     let flags = masks::build_flags(
         &grid, &slice.layer, &etopo, Some(&basin_id),
         cfg.latitude_range_to_keep, &cfg.basins_to_remove, cfg.bathy_clip_m, &never, &incomplete,

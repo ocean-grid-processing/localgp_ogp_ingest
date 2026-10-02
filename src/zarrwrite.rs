@@ -5,8 +5,10 @@
 //! + `gzip` codecs — gzip via flate2 is pure Rust and read natively by zarr-python/xarray.
 //!
 //! Layout per layer (see ../zarr_schema.md):
-//!   ohc_mean      (time,lat,lon)         f64, 1 chunk
-//!   ohc_ensemble  (member,time,lat,lon)  f64, chunk (1,time,lat,lon) → one file per member
+//!   field_mean      (time,lat,lon)         f64, 1 chunk   (units/long_name from [quantity])
+//!   field_ensemble  (member,time,lat,lon)  f64, chunk (1,time,lat,lon) → one file per member;
+//!                 the member count is whatever the mapping files held (absent when mean-only,
+//!                 and then the `member` coordinate is absent too)
 //!   mask_flags    (lat,lon)              u8
 //!   etopo         (lat,lon)              f32
 //!   basin_id      (lat,lon)              i16
@@ -172,14 +174,14 @@ pub fn write_layer_store(
     // Provenance blocks: the whole resolved config (cold-serialized) plus the derived run facts, both
     // compact JSON strings — one line each, so they read cleanly in `ncdump -h` (pretty-printing
     // there collapses to `\n`-littered noise) and travel unchanged into the downstream netCDF attrs.
-    let n_members = data.ohc_ensemble.as_ref().map(|e| e.shape()[0]);
+    let n_members = data.field_ensemble.as_ref().map(|e| e.shape()[0]);
     let run_config_json = serde_json::to_string(cfg).context("serializing run_config")?;
     let run_facts_json = serde_json::to_string(&run_facts_value(slice, grid, n_members))
         .context("serializing run_facts")?;
     let mut group_attrs = json!({
         "Conventions": "CF-1.10",
-        "title": format!("LocalGP ocean heat content — {}, {}-{} dbar",
-                         cfg.run_tag, layer.top, layer.bottom),
+        "title": format!("LocalGP {} — {}, {}-{} dbar",
+                         cfg.quantity.long_name, cfg.run_tag, layer.top, layer.bottom),
         "source": format!("LocalGP {}; var={}; run={}", cfg.model_name, cfg.var_name, cfg.run_tag),
         "mapped_fields_tag": cfg.run_tag.clone(),
         "provenance_tag": cfg.run_tag.clone(),          // global run token (shared, inherited downstream)
@@ -188,9 +190,10 @@ pub fn write_layer_store(
         "model_name": cfg.model_name,
         "layer_top": layer.top,
         "layer_bottom": layer.bottom,
-        "cp0": cfg.cp0,
-        "rho0": cfg.rho0,
         "domain": "lon 20.5..379.5E, lat -89.5..89.5N, 1deg",
+        // the mapped quantity and its scaling, as one compact JSON string (travels unchanged into
+        // the downstream netCDF attrs, like the provenance blocks)
+        "quantity": serde_json::to_string(&cfg.quantity).context("serializing quantity")?,
     });
     // Stage-namespaced local provenance — keyed off STAGE so a binary rename doesn't move them, and
     // so downstream steps can roll every `*_run_config` / `_run_facts` / `_code_version` forward as-is.
@@ -214,10 +217,13 @@ pub fn write_layer_store(
     let time = Array2::from_shape_vec((time_days.len(), 1), time_days)?;
     write_array_single_chunk(&root, "time", &time.column(0), &["time"],
         json!({"units": format!("days since {:04}-{:02}-15", y0, m0), "calendar":"proleptic_gregorian"}))?;
-    let member: Vec<i16> = (1..=crate::consts::NMEMBER as i16).collect();
-    let member = Array2::from_shape_vec((member.len(), 1), member)?;
-    write_array_single_chunk(&root, "member", &member.column(0), &["member"],
-        json!({"long_name":"conditional simulation member"}))?;
+    // The member coordinate exists only when the ensemble does; its length is the ensemble's.
+    if let Some(nm) = n_members {
+        let member: Vec<i16> = (1..=nm as i16).collect();
+        let member = Array2::from_shape_vec((member.len(), 1), member)?;
+        write_array_single_chunk(&root, "member", &member.column(0), &["member"],
+            json!({"long_name":"conditional simulation member"}))?;
+    }
 
     // ---- ancillary grids ----
     write_array_single_chunk(&root, "etopo", &etopo.view(), &["lat","lon"],
@@ -233,15 +239,17 @@ pub fn write_layer_store(
             "flag_meanings": masks::FLAG_MEANINGS,
         }))?;
 
-    // ---- ohc_mean (single chunk) ----
-    write_array_single_chunk(&root, "ohc_mean", &data.ohc_mean.view(), &["time","lat","lon"],
-        json!({"units":"J/m2","long_name":"ocean heat content (posterior mean)"}))?;
+    // ---- field_mean (single chunk) ----
+    let units = &cfg.quantity.units;
+    let long_name = &cfg.quantity.long_name;
+    write_array_single_chunk(&root, "field_mean", &data.field_mean.view(), &["time","lat","lon"],
+        json!({"units": units, "long_name": format!("{long_name} (posterior mean)")}))?;
 
-    // ---- ohc_ensemble: (member,time,lat,lon), chunk (1,time,lat,lon) per member ----
+    // ---- field_ensemble: (member,time,lat,lon), chunk (1,time,lat,lon) per member ----
     // Omitted entirely for a mean-only store (ingested with --no-ensemble).
-    if let Some(ens) = &data.ohc_ensemble {
+    if let Some(ens) = &data.field_ensemble {
         let (nm, nt, nlat, nlon) = ens.dim();
-        let dir = root.join("ohc_ensemble");
+        let dir = root.join("field_ensemble");
         fs::create_dir_all(&dir)?;
         write_json(
             &dir.join("zarr.json"),
@@ -249,7 +257,7 @@ pub fn write_layer_store(
                 &[nm, nt, nlat, nlon],
                 &[1, nt, nlat, nlon],
                 &["member", "time", "lat", "lon"],
-                json!({"units":"J/m2","long_name":"ocean heat content (conditional simulations)"}),
+                json!({"units": units, "long_name": format!("{long_name} (conditional simulations)")}),
             ),
         )?;
         for m in 0..nm {

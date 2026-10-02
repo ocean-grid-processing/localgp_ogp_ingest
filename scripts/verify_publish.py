@@ -7,23 +7,22 @@ J/m^2 -> TJ/m^2, time re-referenced to 1900). Uses scipy.io.loadmat as an indepe
 
     python verify_publish.py SUBMISSION.nc DIR_MEAN DIR_ENSEMBLE [--no-sd] [--ensemble]
 
-`--ensemble` also checks the sibling `OHCENS_<...>.nc` (the full per-member ensemble written by
-`publish.py --ensemble`, located by swapping the `OHC_` filename prefix) member-by-member
+`--ensemble` also checks the sibling `<NAME>ENS_<...>.nc` (the full per-member ensemble written by
+`publish.py --ensemble`, located by swapping the `<NAME>_` filename prefix) member-by-member
 against the `.mat` ensemble.
 
-DATA, DATA_SD and OHCENS are all float64 end to end, so each matches a float64 recompute (DATA/OHCENS
+DATA, DATA_SD and ENS are all float64 end to end, so each matches a float64 recompute (scale terms and unit factor read from the submission's `quantity` attr) (DATA/ENS
 to ~1e-12, DATA_SD to ~1e-9 — a std cancels more). Tolerances adapt to each variable's stored dtype,
 so an older float32 file still checks (to ~1e-6, the float32 /1e12 rounding).
 Requires: xarray, numpy, scipy, netCDF4.
 """
 import argparse
+import json
 import os
 
 import numpy as np
 import xarray as xr
 from scipy.io import loadmat
-
-TERA = 1e12
 
 
 def _tol(dtype, f64_tol):
@@ -31,24 +30,33 @@ def _tol(dtype, f64_tol):
     return f64_tol if np.dtype(dtype) == np.float64 else 1e-6
 
 
-def expected_data(mat_lonlat, cp0, rho0, out_dtype):
+def ingest_scale(q):
+    """The ingest factor: the product of the quantity's named scale terms, multiplied in key order
+    exactly as the Rust does (a BTreeMap iterates sorted by key), so the arithmetic matches."""
+    scale = 1.0
+    for k in sorted(q["scale_terms"]):
+        scale *= float(q["scale_terms"][k])
+    return scale
+
+
+def expected_data(mat_lonlat, scale, unit_factor, out_dtype):
     """Recompute the published DATA in float64 (ingest stores the mean f64) and cast to the
     submission's stored dtype (float64; float32 only for an older f32 file)."""
-    v = (mat_lonlat.astype(np.float64) * cp0 * rho0) / TERA   # J/m^2 -> TJ/m^2, f64
+    v = (mat_lonlat.astype(np.float64) * scale) / unit_factor   # stored -> published units, f64
     return v.astype(out_dtype)
 
 
-def expected_sd(ens_lonlatmember, cp0, rho0, out_dtype):
+def expected_sd(ens_lonlatmember, scale, unit_factor, out_dtype):
     """Ensemble 1-sigma, recomputed in f64 (the store is f64 for mean and ensemble) and cast to the
     stored DATA_SD dtype."""
-    s = ens_lonlatmember.astype(np.float64) * cp0 * rho0   # [lon, lat, member] J/m^2, f64
-    sd = np.std(s, axis=2, ddof=1) / TERA                  # 1-sigma, TJ/m^2, f64
+    s = ens_lonlatmember.astype(np.float64) * scale       # [lon, lat, member], stored units, f64
+    sd = np.std(s, axis=2, ddof=1) / unit_factor           # 1-sigma, published units, f64
     return sd.astype(out_dtype)
 
 
-def expected_ens(ens_lonlatmember, cp0, rho0, out_dtype):
+def expected_ens(ens_lonlatmember, scale, unit_factor, out_dtype):
     """Per-member published value: ingest f64 -> publish astype(dtype), kept 3-D."""
-    v = (ens_lonlatmember.astype(np.float64) * cp0 * rho0) / TERA   # J/m^2 -> TJ/m^2, f64
+    v = (ens_lonlatmember.astype(np.float64) * scale) / unit_factor
     return v.astype(out_dtype)
 
 
@@ -59,17 +67,20 @@ def main():
     ap.add_argument("dir_ensemble")
     ap.add_argument("--no-sd", action="store_true", help="skip the DATA_SD check")
     ap.add_argument("--ensemble", action="store_true",
-                    help="also check the sibling OHCENS_<...>.nc ensemble file member-by-member")
+                    help="also check the sibling <NAME>ENS_<...>.nc ensemble file member-by-member")
     args = ap.parse_args()
 
     ds = xr.open_dataset(args.submission, decode_times=False)
     if ds["DATA"].ndim != 3:
         raise SystemExit(
-            "error: %s has %d-D DATA, expected the 3-D OHC_ submission. Pass the OHC_ submission "
-            "file, not the OHCENS_ ensemble file; --ensemble finds the OHCENS_ sibling itself."
+            "error: %s has %d-D DATA, expected the 3-D submission. Pass the submission file, not "
+            "the <NAME>ENS_ ensemble file; --ensemble finds the ENS_ sibling itself."
             % (os.path.basename(args.submission), ds["DATA"].ndim))
     a = ds.attrs
-    cp0, rho0 = a["cp0"], a["rho0"]
+    q = json.loads(a["quantity"])
+    factor = ingest_scale(q)                 # the ingest scale (product of the named terms)
+    unit_factor = float(q["publish_unit_factor"])
+    prefix = q["name"].upper() + "_"
     var, model, layer = a["var_name"], a["model_name"], a["mapped_layer"]
     has_sd = ("DATA_SD" in ds) and not args.no_sd
 
@@ -82,9 +93,10 @@ def main():
     data_ens = None
     if args.ensemble:
         base = os.path.basename(args.submission)
-        if not base.startswith("OHC_"):
-            raise SystemExit("error: cannot derive the OHCENS_ name from %r (expected an OHC_ submission)" % base)
-        ens_nc = os.path.join(os.path.dirname(args.submission), "OHCENS_" + base[len("OHC_"):])
+        if not base.startswith(prefix):
+            raise SystemExit("error: cannot derive the %sENS_ name from %r (expected a %s submission)"
+                             % (prefix[:-1], base, prefix))
+        ens_nc = os.path.join(os.path.dirname(args.submission), prefix[:-1] + "ENS_" + base[len(prefix):])
         if not os.path.exists(ens_nc):
             raise SystemExit("error: --ensemble given but %s not found "
                              "(run publish.py --ensemble first)" % os.path.basename(ens_nc))
@@ -110,7 +122,7 @@ def main():
         stem = "%sFullField%%s%s_%s_%02d_%d.mat" % (var, model, layer, month, year)
 
         mean_path = os.path.join(args.dir_mean, stem % "")
-        exp = expected_data(loadmat(mean_path)["fullFieldGrid"], cp0, rho0, data_dtype)
+        exp = expected_data(loadmat(mean_path)["fullFieldGrid"], factor, unit_factor, data_dtype)
         got = data[:, :, t]
         finite = np.isfinite(got)
         assert np.all(np.isfinite(exp[finite])), "DATA finite where .mat is NaN at %04d-%02d" % (year, month)
@@ -125,7 +137,7 @@ def main():
             ens_path = os.path.join(args.dir_ensemble, stem % "LocalCondSim")
             ens_mat = loadmat(ens_path)["fullFieldGrid"]    # [lon, lat, member]
             if has_sd:
-                exp_s = expected_sd(ens_mat, cp0, rho0, data_sd.dtype)
+                exp_s = expected_sd(ens_mat, factor, unit_factor, data_sd.dtype)
                 got_s = data_sd[:, :, t]
                 finite = np.isfinite(got_s)
                 rel = np.abs(got_s[finite] - exp_s[finite]) / (np.abs(exp_s[finite]) + 1e-30)
@@ -133,14 +145,14 @@ def main():
                 assert mr < sd_rtol, "DATA_SD differs at %04d-%02d (max rel %g)" % (year, month, mr)
                 worst_sd = max(worst_sd, mr)
             if args.ensemble:
-                exp_e = np.transpose(expected_ens(ens_mat, cp0, rho0, data_ens.dtype), (2, 0, 1))  # [member,lon,lat]
+                exp_e = np.transpose(expected_ens(ens_mat, factor, unit_factor, data_ens.dtype), (2, 0, 1))  # [member,lon,lat]
                 got_e = data_ens[:, :, :, t]                                       # [MEMBER,LON,LAT]
                 finite = np.isfinite(got_e)
                 if finite.any():
                     me = float(np.abs(got_e[finite] - exp_e[finite]).max())
                     scale = float(np.abs(exp_e[finite]).max())
                     assert me <= ens_rtol * scale, \
-                        "OHCENS differs at %04d-%02d (max %g, field scale %g)" % (year, month, me, scale)
+                        "ENS differs at %04d-%02d (max %g, field scale %g)" % (year, month, me, scale)
                     worst_ens = max(worst_ens, me)
 
         if (t + 1) % 24 == 0 or t == nt - 1:
@@ -150,7 +162,7 @@ def main():
     if has_sd:
         msg += ", DATA_SD max rel diff=%g" % worst_sd
     if args.ensemble:
-        msg += ", OHCENS max diff=%g" % worst_ens
+        msg += ", ENS max diff=%g" % worst_ens
     print(msg)
 
 

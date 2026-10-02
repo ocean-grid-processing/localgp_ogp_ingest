@@ -1,4 +1,4 @@
-//! ohc_ingest — turn LocalGP `.mat` output into clean OHC zarr grids + bit-band masks.
+//! localgp_ogp_ingest — turn LocalGP `.mat` output into clean OHC zarr grids + bit-band masks.
 //!
 //! Scope: read `.mat` (FullField mean + LocalCondSim ensemble), convert integrated
 //! temperature to OHC (`* cp0 * rho0`), preserve NaNs, derive ancillary grids and the
@@ -30,8 +30,6 @@ pub mod consts {
     pub const NLON: usize = 360;
     /// Mapping grid latitude count (−89.5 … 89.5, 1°).
     pub const NLAT: usize = 180;
-    /// Conditional-simulation ensemble size.
-    pub const NMEMBER: usize = 100;
 }
 
 /// The canonical 1° mapping grid (cell centres).
